@@ -1,0 +1,23 @@
+[package]
+name = "hyperclips"
+description = "Hyper Clips background service (tray, hotkeys, capture)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "hyperclips"
+path = "src/main.rs"
+
+[dependencies]
+hc-core.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+hc-os-win.workspace = true
+
+[lints]
+workspace = true

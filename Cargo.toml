@@ -1,0 +1,42 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/hc-core",
+    "crates/hc-os-win",
+    "apps/hyperclips",
+    "apps/hyperclips-ui",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/troppofranco/hyper-clips"
+
+[workspace.dependencies]
+hc-core = { path = "crates/hc-core" }
+hc-os-win = { path = "crates/hc-os-win" }
+
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+toml = "0.8"
+tracing = "0.1"
+tracing-appender = "0.2"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "std"] }
+# Pinned to versions whose API I know. Newer releases exist (windows 0.62.2, eframe 0.37.0 as of
+# 2026-11); upgrade deliberately and re-check the Win32/egui call sites, I could not verify them.
+windows = "0.61"
+eframe = { version = "0.31", default-features = false, features = ["default_fonts", "glow", "accesskit"] }
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
+opt-level = 3

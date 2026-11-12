@@ -1,0 +1,19 @@
+[package]
+name = "hyperclips-ui"
+description = "Hyper Clips window, started on demand by the background service"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "hyperclips-ui"
+path = "src/main.rs"
+
+[dependencies]
+hc-core.workspace = true
+eframe.workspace = true
+
+[lints]
+workspace = true
