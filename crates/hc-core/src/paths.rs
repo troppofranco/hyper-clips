@@ -111,15 +111,15 @@ mod tests {
 
     #[test]
     fn windows_root_is_appdata() {
-        let env = env_of(&[("APPDATA", "/r/AppData")]);
-        let p = AppPaths::resolve_with(Path::new("/app"), &env, true).unwrap();
+        // A path that is absolute on the host OS (a bare "/x" is not absolute on Windows).
+        let appdata = std::env::temp_dir().join("AppData");
+        let env = move |k: &str| (k == "APPDATA").then(|| appdata.clone().into_os_string());
+        let p = AppPaths::resolve_with(Path::new("app"), &env, true).unwrap();
+        let expected = std::env::temp_dir().join("AppData").join("HyperClips");
         assert!(!p.is_portable());
-        assert_eq!(p.root(), Path::new("/r/AppData/HyperClips"));
-        assert_eq!(
-            p.config_file(),
-            Path::new("/r/AppData/HyperClips/config.toml")
-        );
-        assert_eq!(p.lang_dir(), Path::new("/app/lang"));
+        assert_eq!(p.root(), expected.as_path());
+        assert_eq!(p.config_file(), expected.join("config.toml"));
+        assert_eq!(p.lang_dir(), Path::new("app").join("lang"));
     }
 
     #[test]
