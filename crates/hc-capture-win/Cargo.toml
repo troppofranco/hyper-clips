@@ -1,0 +1,32 @@
+[package]
+name = "hc-capture-win"
+description = "Screen capture through Windows Graphics Capture (no injection, anti-cheat friendly)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+repository.workspace = true
+
+# Empty on other operating systems so the workspace still builds there.
+[target.'cfg(windows)'.dependencies]
+hc-core.workspace = true
+tracing.workspace = true
+windows = { workspace = true, features = [
+    "Foundation",
+    "Graphics_Capture",
+    "Graphics_DirectX",
+    "Graphics_DirectX_Direct3D11",
+    "Win32_Foundation",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Graphics_Gdi",
+    "Win32_System_WinRT",
+    "Win32_System_WinRT_Direct3D11",
+    "Win32_System_WinRT_Graphics_Capture",
+] }
+
+[lints]
+workspace = true

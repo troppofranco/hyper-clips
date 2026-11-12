@@ -3,6 +3,8 @@ resolver = "2"
 members = [
     "crates/hc-core",
     "crates/hc-os-win",
+    "crates/hc-buffer",
+    "crates/hc-capture-win",
     "apps/hyperclips",
     "apps/hyperclips-ui",
 ]
@@ -17,6 +19,8 @@ repository = "https://github.com/troppofranco/hyper-clips"
 [workspace.dependencies]
 hc-core = { path = "crates/hc-core" }
 hc-os-win = { path = "crates/hc-os-win" }
+hc-buffer = { path = "crates/hc-buffer" }
+hc-capture-win = { path = "crates/hc-capture-win" }
 
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
