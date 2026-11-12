@@ -5,6 +5,7 @@ members = [
     "crates/hc-os-win",
     "crates/hc-buffer",
     "crates/hc-capture-win",
+    "crates/hc-encode-win",
     "apps/hyperclips",
     "apps/hyperclips-ui",
 ]
@@ -21,6 +22,7 @@ hc-core = { path = "crates/hc-core" }
 hc-os-win = { path = "crates/hc-os-win" }
 hc-buffer = { path = "crates/hc-buffer" }
 hc-capture-win = { path = "crates/hc-capture-win" }
+hc-encode-win = { path = "crates/hc-encode-win" }
 
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }

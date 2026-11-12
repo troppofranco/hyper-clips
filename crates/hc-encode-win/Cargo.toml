@@ -1,0 +1,25 @@
+[package]
+name = "hc-encode-win"
+description = "H.264 encoding and MP4 muxing through Media Foundation (+ portable pixel conversion)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+repository.workspace = true
+
+[dependencies]
+hc-core.workspace = true
+hc-buffer.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+tracing.workspace = true
+windows = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_Media_MediaFoundation",
+    "Win32_System_Com",
+    "Win32_System_Variant",
+] }
+
+[lints]
+workspace = true
