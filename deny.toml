@@ -7,6 +7,12 @@ targets = ["x86_64-pc-windows-msvc"]
 
 [advisories]
 yanked = "deny"
+# Both are "unmaintained" notices (not vulnerabilities) pulled in only by the egui 0.31
+# stack used by hyperclips-ui. Re-check when egui is upgraded and remove these entries.
+ignore = [
+    { id = "RUSTSEC-2024-0436", reason = "paste unmaintained; transitive via egui/accesskit, no vulnerability" },
+    { id = "RUSTSEC-2026-0192", reason = "ttf-parser unmaintained; transitive via egui fonts, no vulnerability" },
+]
 
 [licenses]
 allow = [
@@ -28,6 +34,7 @@ confidence-threshold = 0.8
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
+allow-wildcard-paths = true
 
 [sources]
 unknown-registry = "deny"
