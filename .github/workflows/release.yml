@@ -1,0 +1,99 @@
+# Every push to main builds Hyper Clips and publishes a GitHub Release (v0.1.<run number>).
+# The in-app updater (Phase 5) reads the latest release.
+#
+# Optional signing: add the repository secret MINISIGN_SECRET_KEY (an UNENCRYPTED minisign/rsign
+# secret key, see docs/RELEASING.md). Without it the release is published unsigned and the
+# updater refuses to install it.
+name: release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+    env:
+      VERSION: 0.1.${{ github.run_number }}
+      HC_VERSION: 0.1.${{ github.run_number }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Stamp the version
+        shell: pwsh
+        run: |
+          $c = Get-Content Cargo.toml -Raw
+          $c = [regex]::Replace($c, '(?m)^version = "[^"]*"', "version = `"$env:VERSION`"", 1)
+          Set-Content Cargo.toml $c -NoNewline
+          Select-String -Path Cargo.toml -Pattern '^version = '
+
+      - run: cargo build --release --workspace
+
+      - name: Stage files
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path dist | Out-Null
+          Copy-Item target/release/hyperclips.exe, target/release/hyperclips-ui.exe dist/
+          if (Test-Path target/release/hc-updater-helper.exe) { Copy-Item target/release/hc-updater-helper.exe dist/ }
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup -y --no-progress
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" installer\hyperclips.iss
+          Get-ChildItem dist
+
+      - name: Build portable zip
+        shell: pwsh
+        run: |
+          $dir = "HyperClips-$env:VERSION-portable"
+          New-Item -ItemType Directory -Path $dir | Out-Null
+          Copy-Item dist/*.exe $dir -Exclude "HyperClips-Setup-*"
+          New-Item -ItemType Directory -Path "$dir/lang" | Out-Null
+          Copy-Item crates/hc-core/lang/*.toml "$dir/lang"
+          New-Item -ItemType File -Path "$dir/portable.flag" | Out-Null
+          Compress-Archive -Path $dir -DestinationPath "dist/$dir.zip"
+
+      - name: Checksums
+        shell: pwsh
+        run: |
+          Set-Location dist
+          $lines = Get-ChildItem -File | Where-Object { $_.Name -like "HyperClips-*" } | ForEach-Object {
+            $h = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+            "$h  $($_.Name)"
+          }
+          $lines | Set-Content -Encoding ascii checksums.txt
+          Get-Content checksums.txt
+
+      - name: Sign (only when the secret exists)
+        shell: pwsh
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+        run: |
+          if (-not $env:MINISIGN_SECRET_KEY) { Write-Host "No signing key: release will be unsigned."; exit 0 }
+          cargo install rsign2 --locked
+          Set-Content -Path "$env:RUNNER_TEMP/minisign.key" -Value $env:MINISIGN_SECRET_KEY -Encoding ascii
+          Set-Location dist
+          foreach ($f in Get-ChildItem -File | Where-Object { $_.Name -like "HyperClips-*" -or $_.Name -eq "checksums.txt" }) {
+            rsign sign -s "$env:RUNNER_TEMP/minisign.key" -x "$($f.Name).minisig" $f.Name
+            if ($LASTEXITCODE -ne 0) { throw "signing failed for $($f.Name)" }
+          }
+          Remove-Item "$env:RUNNER_TEMP/minisign.key"
+
+      - name: Publish release
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem dist -File | Where-Object { $_.Name -like "HyperClips-*" -or $_.Name -eq "checksums.txt" -or $_.Name -like "*.minisig" } | ForEach-Object { $_.FullName }
+          gh release create "v$env:VERSION" @files --title "Hyper Clips $env:VERSION" --generate-notes --latest --target $env:GITHUB_SHA
