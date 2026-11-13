@@ -1,0 +1,19 @@
+[package]
+name = "hc-updater-helper"
+description = "Applies a verified update after the app has exited, with backup and rollback"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+repository.workspace = true
+
+[[bin]]
+name = "hc-updater-helper"
+path = "src/main.rs"
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = ["Win32_Foundation", "Win32_System_Threading"] }
+
+[lints]
+workspace = true

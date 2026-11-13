@@ -68,6 +68,22 @@ pub struct Video {
     pub bitrate_kbps: u32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum Channel {
+    #[default]
+    Stable,
+    Beta,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct Updates {
+    pub channel: Channel,
+    /// Version the user chose to ignore (empty = none).
+    pub skip_version: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct Storage {
@@ -82,6 +98,7 @@ pub struct Config {
     pub replay: Replay,
     pub video: Video,
     pub storage: Storage,
+    pub updates: Updates,
     pub hotkeys: Hotkeys,
     pub privacy: Privacy,
 }
@@ -261,6 +278,15 @@ mod tests {
     fn rejects_out_of_range_duration() {
         assert!(Config::from_toml("[replay]\nduration_secs = 5\n").is_err());
         assert!(Config::from_toml("[replay]\nduration_secs = 601\n").is_err());
+    }
+
+    #[test]
+    fn update_channel_parses() {
+        let c =
+            Config::from_toml("[updates]\nchannel = \"beta\"\nskip_version = \"0.1.5\"\n").unwrap();
+        assert_eq!(c.updates.channel, Channel::Beta);
+        assert_eq!(c.updates.skip_version, "0.1.5");
+        assert!(Config::from_toml("[updates]\nchannel = \"nightly\"\n").is_err());
     }
 
     #[test]

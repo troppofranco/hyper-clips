@@ -33,6 +33,7 @@ const ID_OPEN: usize = 1;
 const ID_SAVE: usize = 2;
 const ID_TOGGLE: usize = 3;
 const ID_QUIT: usize = 4;
+const ID_UPDATES: usize = 5;
 
 static TASKBAR_CREATED: AtomicU32 = AtomicU32::new(0);
 
@@ -41,6 +42,7 @@ pub enum TrayEvent {
     Open,
     SaveClip,
     ToggleRecording,
+    CheckUpdates,
     Hotkey(HotkeyAction),
 }
 
@@ -50,6 +52,7 @@ pub struct TrayLabels {
     pub open: String,
     pub save_clip: String,
     pub toggle_recording: String,
+    pub check_updates: String,
     pub quit: String,
 }
 
@@ -223,6 +226,7 @@ unsafe fn show_menu(hwnd: HWND) {
         (ID_OPEN, &labels.open),
         (ID_SAVE, &labels.save_clip),
         (ID_TOGGLE, &labels.toggle_recording),
+        (ID_UPDATES, &labels.check_updates),
         (ID_QUIT, &labels.quit),
     ] {
         let text = wide::str(text);
@@ -249,6 +253,7 @@ unsafe fn show_menu(hwnd: HWND) {
         ID_OPEN => emit(TrayEvent::Open),
         ID_SAVE => emit(TrayEvent::SaveClip),
         ID_TOGGLE => emit(TrayEvent::ToggleRecording),
+        ID_UPDATES => emit(TrayEvent::CheckUpdates),
         ID_QUIT => {
             let _ = PostMessageW(Some(hwnd), WM_CLOSE, WPARAM(0), LPARAM(0));
         }

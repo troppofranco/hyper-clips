@@ -1,0 +1,22 @@
+[package]
+name = "hc-updater"
+description = "Update check against GitHub Releases, with SHA-256 and minisign verification"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+repository.workspace = true
+
+[dependencies]
+hc-core.workspace = true
+semver.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+minisign-verify.workspace = true
+ureq.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

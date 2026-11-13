@@ -7,6 +7,8 @@
 mod pipeline;
 #[cfg(windows)]
 mod service;
+#[cfg(windows)]
+mod update;
 
 #[cfg(windows)]
 fn main() {

@@ -1,7 +1,7 @@
 //! Service wiring (Windows only).
 
 use anyhow::{Context, Result};
-use hc_core::config::Config;
+use hc_core::config::{Config, UpdateCheck};
 use hc_core::consts::{current_user, pipe_path, UI_EXE};
 use hc_core::error::Error as CoreError;
 use hc_core::hotkey::HotkeyAction;
@@ -13,6 +13,7 @@ use hc_os_win::tray::{self, TrayEvent, TrayLabels};
 use hc_os_win::{clock, instance, locale, memory::WinMemoryProbe, pipe, sound};
 
 use crate::pipeline::{Pipeline, PipelineSettings};
+use crate::update::UpdateCtx;
 use std::path::PathBuf;
 use std::process::{Child, Command};
 use std::sync::atomic::{AtomicIsize, Ordering};
@@ -203,9 +204,25 @@ pub fn run() -> Result<()> {
         open: translator.t("tray_open").to_owned(),
         save_clip: translator.t("tray_save_clip").to_owned(),
         toggle_recording: translator.t("tray_toggle_recording").to_owned(),
+        check_updates: translator.t("tray_check_updates").to_owned(),
         quit: translator.t("tray_quit").to_owned(),
     };
 
+    let updater = Arc::new(UpdateCtx::new(
+        paths.clone(),
+        config_path.clone(),
+        config.clone(),
+        Translator::new(
+            &config.general.language,
+            &locale::system_locale(),
+            &paths.lang_dir(),
+        ),
+        Box::new(|| tray::request_quit(TRAY_WINDOW.load(Ordering::Relaxed))),
+    ));
+    if config.privacy.update_check == UpdateCheck::OnStart {
+        updater.spawn_check(false);
+    }
+    let event_updater = Arc::clone(&updater);
     let event_launcher = Arc::clone(&launcher);
     let event_saver = Arc::clone(&saver);
     let on_event = move |event: TrayEvent| match event {
@@ -236,6 +253,7 @@ pub fn run() -> Result<()> {
         TrayEvent::ToggleRecording | TrayEvent::Hotkey(HotkeyAction::ToggleRecording) => {
             tracing::info!("manual recording is not implemented yet");
         }
+        TrayEvent::CheckUpdates => event_updater.spawn_check(true),
         TrayEvent::Hotkey(HotkeyAction::Screenshot) => {
             tracing::info!("screenshots are not implemented yet");
         }

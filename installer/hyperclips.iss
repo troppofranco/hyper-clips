@@ -45,6 +45,7 @@ Name: "startup"; Description: "{cm:TaskStartup}"; GroupDescription: "{cm:Additio
 [Files]
 Source: "..\dist\hyperclips.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\dist\hyperclips-ui.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\dist\hc-updater-helper.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\crates\hc-core\lang\*.toml"; DestDir: "{app}\lang"; Flags: ignoreversion
 
 [Icons]

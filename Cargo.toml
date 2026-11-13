@@ -6,6 +6,8 @@ members = [
     "crates/hc-buffer",
     "crates/hc-capture-win",
     "crates/hc-encode-win",
+    "crates/hc-updater",
+    "apps/hc-updater-helper",
     "apps/hyperclips",
     "apps/hyperclips-ui",
 ]
@@ -23,8 +25,14 @@ hc-os-win = { path = "crates/hc-os-win" }
 hc-buffer = { path = "crates/hc-buffer" }
 hc-capture-win = { path = "crates/hc-capture-win" }
 hc-encode-win = { path = "crates/hc-encode-win" }
+hc-updater = { path = "crates/hc-updater" }
 
 anyhow = "1"
+semver = "1"
+sha2 = "0.10"
+minisign-verify = "0.2"
+# rustls (ring) only, no OpenSSL, no extra features: used by the updater and nothing else.
+ureq = { version = "2", default-features = false, features = ["tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
