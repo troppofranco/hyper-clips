@@ -79,9 +79,9 @@ impl H264Encoder {
             in_type
                 .SetUINT32(&MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive.0 as u32)
                 .map_err(|e| sys("in interlace", e))?;
-            set_pair(&in_attrs, &MF_MT_FRAME_SIZE, width, height)?;
-            set_pair(&in_attrs, &MF_MT_FRAME_RATE, fps, 1)?;
-            set_pair(&in_attrs, &MF_MT_PIXEL_ASPECT_RATIO, 1, 1)?;
+            set_pair(in_attrs, &MF_MT_FRAME_SIZE, width, height)?;
+            set_pair(in_attrs, &MF_MT_FRAME_RATE, fps, 1)?;
+            set_pair(in_attrs, &MF_MT_PIXEL_ASPECT_RATIO, 1, 1)?;
             transform
                 .SetInputType(0, &in_type, 0)
                 .map_err(|e| sys("SetInputType", e))?;
