@@ -116,6 +116,7 @@ impl eframe::App for App {
             if ui.button(self.tr.t("ui_save_clip")).clicked() {
                 self.last_action = Some(match send_request(&self.pipe, &Request::SaveClip) {
                     Ok(Response::Ok) => "OK".to_owned(),
+                    Ok(Response::Saved { path }) => path,
                     Ok(Response::Error { message }) => message,
                     Ok(_) => "?".to_owned(),
                     Err(e) => e.to_string(),

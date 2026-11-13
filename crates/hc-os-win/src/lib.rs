@@ -3,12 +3,14 @@
 
 #![cfg(windows)]
 
+pub mod clock;
 pub mod dialog;
 pub mod instance;
 pub mod locale;
 pub mod memory;
 pub mod pipe;
 pub mod shell;
+pub mod sound;
 pub mod tray;
 
 pub(crate) mod wide {

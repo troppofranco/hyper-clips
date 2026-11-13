@@ -36,7 +36,13 @@ pub enum Response {
     Pong,
     Status(ServiceStatus),
     Ok,
-    Error { message: String },
+    /// A clip was written; `path` is the MP4 file.
+    Saved {
+        path: String,
+    },
+    Error {
+        message: String,
+    },
 }
 
 pub fn encode<T: Serialize>(msg: &T) -> Result<Vec<u8>> {

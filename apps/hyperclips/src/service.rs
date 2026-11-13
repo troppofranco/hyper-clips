@@ -10,7 +10,9 @@ use hc_core::ipc::{send_request, Request, Response, ServiceStatus};
 use hc_core::paths::AppPaths;
 use hc_core::platform::MemoryProbe;
 use hc_os_win::tray::{self, TrayEvent, TrayLabels};
-use hc_os_win::{instance, locale, memory::WinMemoryProbe, pipe};
+use hc_os_win::{clock, instance, locale, memory::WinMemoryProbe, pipe, sound};
+
+use crate::pipeline::{Pipeline, PipelineSettings};
 use std::path::PathBuf;
 use std::process::{Child, Command};
 use std::sync::atomic::{AtomicIsize, Ordering};
@@ -49,6 +51,39 @@ impl UiLauncher {
     }
 }
 
+/// Saves clips from the running pipeline into the clips folder.
+struct ClipSaver {
+    pipeline: Option<Arc<Pipeline>>,
+    dir: PathBuf,
+    secs: u32,
+}
+
+impl ClipSaver {
+    fn save(&self) -> Result<PathBuf> {
+        let pipeline = self
+            .pipeline
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("capture is not running (see the log)"))?;
+        let path = self
+            .dir
+            .join(format!("HyperClips_{}.mp4", clock::local_timestamp()));
+        pipeline.save_clip(&path, self.secs)?;
+        Ok(path)
+    }
+}
+
+fn clips_dir(config: &Config, paths: &AppPaths) -> PathBuf {
+    if !config.storage.clips_dir.is_empty() {
+        PathBuf::from(&config.storage.clips_dir)
+    } else if paths.is_portable() {
+        paths.root().join("clips")
+    } else if let Some(profile) = std::env::var_os("USERPROFILE") {
+        PathBuf::from(profile).join("Videos").join("HyperClips")
+    } else {
+        paths.root().join("clips")
+    }
+}
+
 pub fn run() -> Result<()> {
     let paths = AppPaths::detect()?;
     let pipe_name = pipe_path(&current_user());
@@ -84,6 +119,28 @@ pub fn run() -> Result<()> {
     let translator = Translator::new(&config.general.language, &system_locale, &paths.lang_dir());
     let hotkeys = config.hotkeys.parsed()?;
 
+    // Capture + replay buffer. A failure (no GPU, blocked capture) must not kill the tray.
+    let pipeline = if config.replay.enabled {
+        match Pipeline::start(PipelineSettings {
+            fps: config.video.fps,
+            bitrate_bps: config.video.bitrate_kbps.saturating_mul(1000),
+            replay_secs: config.replay.duration_secs,
+        }) {
+            Ok(p) => Some(Arc::new(p)),
+            Err(e) => {
+                tracing::error!("cannot start capture: {e}");
+                None
+            }
+        }
+    } else {
+        None
+    };
+    let saver = Arc::new(ClipSaver {
+        pipeline: pipeline.clone(),
+        dir: clips_dir(&config, &paths),
+        secs: config.replay.duration_secs,
+    });
+
     let launcher = Arc::new(UiLauncher {
         exe: paths.exe_dir().join(UI_EXE),
         locale: system_locale,
@@ -94,6 +151,8 @@ pub fn run() -> Result<()> {
     let started = Instant::now();
     let portable = paths.is_portable();
     let handler_launcher = Arc::clone(&launcher);
+    let handler_saver = Arc::clone(&saver);
+    let replay_active = pipeline.is_some();
     let handler: pipe::Handler = Arc::new(move |request| match request {
         Request::Ping => Response::Pong,
         Request::GetStatus => {
@@ -101,8 +160,7 @@ pub fn run() -> Result<()> {
             Response::Status(ServiceStatus {
                 version: env!("CARGO_PKG_VERSION").to_owned(),
                 uptime_secs: started.elapsed().as_secs(),
-                // Capture is not implemented yet (Phase 2), so the buffer is never active.
-                replay_active: false,
+                replay_active,
                 portable,
                 working_set_kb: mem.map(|m| m.working_set_kb),
                 private_kb: mem.map(|m| m.private_kb),
@@ -114,8 +172,16 @@ pub fn run() -> Result<()> {
                 message: format!("{e:#}"),
             },
         },
-        Request::SaveClip | Request::ToggleRecording => Response::Error {
-            message: "capture is not implemented yet (Phase 2)".to_owned(),
+        Request::SaveClip => match handler_saver.save() {
+            Ok(path) => Response::Saved {
+                path: path.display().to_string(),
+            },
+            Err(e) => Response::Error {
+                message: format!("{e:#}"),
+            },
+        },
+        Request::ToggleRecording => Response::Error {
+            message: "manual recording is not implemented yet".to_owned(),
         },
         Request::Shutdown => {
             tray::request_quit(TRAY_WINDOW.load(Ordering::Relaxed));
@@ -141,6 +207,7 @@ pub fn run() -> Result<()> {
     };
 
     let event_launcher = Arc::clone(&launcher);
+    let event_saver = Arc::clone(&saver);
     let on_event = move |event: TrayEvent| match event {
         TrayEvent::Open | TrayEvent::Hotkey(HotkeyAction::OpenUi) => {
             if let Err(e) = event_launcher.open() {
@@ -148,13 +215,29 @@ pub fn run() -> Result<()> {
             }
         }
         TrayEvent::SaveClip | TrayEvent::Hotkey(HotkeyAction::SaveClip) => {
-            tracing::info!("save clip requested (capture arrives in Phase 2)");
+            // Muxing takes a moment: keep the tray's message loop free.
+            let saver = Arc::clone(&event_saver);
+            let spawned = std::thread::Builder::new()
+                .name("hc-save".into())
+                .spawn(move || match saver.save() {
+                    Ok(path) => {
+                        tracing::info!("clip saved: {}", path.display());
+                        sound::beep_ok();
+                    }
+                    Err(e) => {
+                        tracing::error!("cannot save clip: {e:#}");
+                        sound::beep_error();
+                    }
+                });
+            if let Err(e) = spawned {
+                tracing::error!("cannot start the save thread: {e}");
+            }
         }
         TrayEvent::ToggleRecording | TrayEvent::Hotkey(HotkeyAction::ToggleRecording) => {
-            tracing::info!("toggle recording requested (capture arrives in Phase 2)");
+            tracing::info!("manual recording is not implemented yet");
         }
         TrayEvent::Hotkey(HotkeyAction::Screenshot) => {
-            tracing::info!("screenshot requested (arrives in Phase 2)");
+            tracing::info!("screenshots are not implemented yet");
         }
     };
 
@@ -162,6 +245,9 @@ pub fn run() -> Result<()> {
         TRAY_WINDOW.store(window, Ordering::Relaxed);
     })?;
 
+    if let Some(p) = &pipeline {
+        p.shutdown();
+    }
     tracing::info!("Hyper Clips stopped");
     Ok(())
 }

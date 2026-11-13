@@ -7,6 +7,10 @@ use std::path::{Path, PathBuf};
 
 pub const MIN_REPLAY_SECS: u32 = 15;
 pub const MAX_REPLAY_SECS: u32 = 600;
+pub const MIN_FPS: u32 = 15;
+pub const MAX_FPS: u32 = 144;
+pub const MIN_BITRATE_KBPS: u32 = 500;
+pub const MAX_BITRATE_KBPS: u32 = 200_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -57,11 +61,27 @@ pub struct Privacy {
     pub strip_metadata: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Video {
+    pub fps: u32,
+    pub bitrate_kbps: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct Storage {
+    /// Folder for saved clips. Empty = default (Videos\HyperClips, or `clips` when portable).
+    pub clips_dir: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct Config {
     pub general: General,
     pub replay: Replay,
+    pub video: Video,
+    pub storage: Storage,
     pub hotkeys: Hotkeys,
     pub privacy: Privacy,
 }
@@ -80,6 +100,15 @@ impl Default for Replay {
         Self {
             enabled: true,
             duration_secs: 60,
+        }
+    }
+}
+impl Default for Video {
+    fn default() -> Self {
+        // The Phase 2 encoder is software H.264, so the default stays modest.
+        Self {
+            fps: 30,
+            bitrate_kbps: 8000,
         }
     }
 }
@@ -136,6 +165,16 @@ impl Config {
         if !(MIN_REPLAY_SECS..=MAX_REPLAY_SECS).contains(&self.replay.duration_secs) {
             return Err(Error::Invalid(format!(
                 "replay.duration_secs must be {MIN_REPLAY_SECS}..={MAX_REPLAY_SECS}"
+            )));
+        }
+        if !(MIN_FPS..=MAX_FPS).contains(&self.video.fps) {
+            return Err(Error::Invalid(format!(
+                "video.fps must be {MIN_FPS}..={MAX_FPS}"
+            )));
+        }
+        if !(MIN_BITRATE_KBPS..=MAX_BITRATE_KBPS).contains(&self.video.bitrate_kbps) {
+            return Err(Error::Invalid(format!(
+                "video.bitrate_kbps must be {MIN_BITRATE_KBPS}..={MAX_BITRATE_KBPS}"
             )));
         }
         // Language is later used to build a file path: forbid anything but a plain code.
@@ -222,6 +261,14 @@ mod tests {
     fn rejects_out_of_range_duration() {
         assert!(Config::from_toml("[replay]\nduration_secs = 5\n").is_err());
         assert!(Config::from_toml("[replay]\nduration_secs = 601\n").is_err());
+    }
+
+    #[test]
+    fn rejects_bad_video_settings() {
+        assert!(Config::from_toml("[video]\nfps = 5\n").is_err());
+        assert!(Config::from_toml("[video]\nbitrate_kbps = 10\n").is_err());
+        let ok = Config::from_toml("[video]\nfps = 60\nbitrate_kbps = 20000\n").unwrap();
+        assert_eq!((ok.video.fps, ok.video.bitrate_kbps), (60, 20000));
     }
 
     #[test]

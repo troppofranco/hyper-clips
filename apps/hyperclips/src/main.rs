@@ -4,6 +4,8 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 #[cfg(windows)]
+mod pipeline;
+#[cfg(windows)]
 mod service;
 
 #[cfg(windows)]
