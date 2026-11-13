@@ -5,14 +5,15 @@
 
 use crate::annexb;
 use crate::convert::{bgra_to_nv12, nv12_size};
-use crate::mf::{h264_type, sys};
+use crate::mf::{h264_type, set_pair, sys};
 use crate::VideoInfo;
 use hc_buffer::Packet;
 use hc_core::error::{Error, Result};
 use std::mem::ManuallyDrop;
-use windows::core::{Interface, GUID, VARIANT};
+use windows::core::{Interface, GUID};
 use windows::Win32::Media::MediaFoundation::*;
 use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_INPROC_SERVER};
+use windows::Win32::System::Variant::VARIANT;
 
 /// CLSID_MSH264EncoderMFT, spelled out so the code does not depend on the constant's name.
 const MS_H264_ENCODER: GUID = GUID::from_u128(0x6ca50344_051a_4ded_9779_a43305165e35);
@@ -68,6 +69,7 @@ impl H264Encoder {
                 .map_err(|e| sys("SetOutputType", e))?;
 
             let in_type = MFCreateMediaType().map_err(|e| sys("input type", e))?;
+            let in_attrs: &IMFAttributes = &in_type;
             in_type
                 .SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Video)
                 .map_err(|e| sys("in major", e))?;
@@ -77,12 +79,9 @@ impl H264Encoder {
             in_type
                 .SetUINT32(&MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive.0 as u32)
                 .map_err(|e| sys("in interlace", e))?;
-            MFSetAttributeSize(&in_type, &MF_MT_FRAME_SIZE, width, height)
-                .map_err(|e| sys("in size", e))?;
-            MFSetAttributeRatio(&in_type, &MF_MT_FRAME_RATE, fps, 1)
-                .map_err(|e| sys("in rate", e))?;
-            MFSetAttributeRatio(&in_type, &MF_MT_PIXEL_ASPECT_RATIO, 1, 1)
-                .map_err(|e| sys("in aspect", e))?;
+            set_pair(&in_attrs, &MF_MT_FRAME_SIZE, width, height)?;
+            set_pair(&in_attrs, &MF_MT_FRAME_RATE, fps, 1)?;
+            set_pair(&in_attrs, &MF_MT_PIXEL_ASPECT_RATIO, 1, 1)?;
             transform
                 .SetInputType(0, &in_type, 0)
                 .map_err(|e| sys("SetInputType", e))?;

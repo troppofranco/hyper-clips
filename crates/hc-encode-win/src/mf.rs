@@ -18,6 +18,19 @@ pub fn init() -> Result<()> {
     unsafe { MFStartup(MF_VERSION, MFSTARTUP_FULL) }.map_err(|e| sys("MFStartup", e))
 }
 
+/// Packs two u32 into the 64-bit attribute layout Media Foundation uses for sizes and ratios
+/// (what the C helpers `MFSetAttributeSize` / `MFSetAttributeRatio` do).
+pub(crate) fn set_pair(
+    attrs: &IMFAttributes,
+    key: &windows::core::GUID,
+    hi: u32,
+    lo: u32,
+) -> Result<()> {
+    // SAFETY: plain COM call.
+    unsafe { attrs.SetUINT64(key, (u64::from(hi) << 32) | u64::from(lo)) }
+        .map_err(|e| sys("set attribute pair", e))
+}
+
 /// Builds an H.264 video media type for `info`.
 pub(crate) fn h264_type(info: &VideoInfo, sequence_header: &[u8]) -> Result<IMFMediaType> {
     // SAFETY: all calls are plain COM calls on objects created here.
@@ -31,12 +44,10 @@ pub(crate) fn h264_type(info: &VideoInfo, sequence_header: &[u8]) -> Result<IMFM
             .map_err(|e| sys("bitrate", e))?;
         t.SetUINT32(&MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive.0 as u32)
             .map_err(|e| sys("interlace", e))?;
-        MFSetAttributeSize(&t, &MF_MT_FRAME_SIZE, info.width, info.height)
-            .map_err(|e| sys("frame size", e))?;
-        MFSetAttributeRatio(&t, &MF_MT_FRAME_RATE, info.fps, 1)
-            .map_err(|e| sys("frame rate", e))?;
-        MFSetAttributeRatio(&t, &MF_MT_PIXEL_ASPECT_RATIO, 1, 1)
-            .map_err(|e| sys("pixel aspect", e))?;
+        let attrs: &IMFAttributes = &t;
+        set_pair(attrs, &MF_MT_FRAME_SIZE, info.width, info.height)?;
+        set_pair(attrs, &MF_MT_FRAME_RATE, info.fps, 1)?;
+        set_pair(attrs, &MF_MT_PIXEL_ASPECT_RATIO, 1, 1)?;
         if !sequence_header.is_empty() {
             t.SetBlob(&MF_MT_MPEG_SEQUENCE_HEADER, sequence_header)
                 .map_err(|e| sys("sequence header", e))?;
