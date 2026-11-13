@@ -22,6 +22,17 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
       - run: cargo build --release --workspace
+      - name: Collect build
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path dist | Out-Null
+          Copy-Item target/release/hyperclips.exe, target/release/hyperclips-ui.exe dist/
+          Copy-Item scripts/measure-memory.ps1 dist/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hyperclips-windows-x64
+          path: dist/
+          retention-days: 14
 
   deny:
     runs-on: ubuntu-latest
