@@ -401,18 +401,6 @@ fn format_date(secs: i64) -> String {
     )
 }
 
-#[cfg(test)]
-mod tests {
-    use super::format_date;
-
-    #[test]
-    fn formats_unix_dates() {
-        assert_eq!(format_date(0), "1970-01-01 00:00");
-        assert_eq!(format_date(1_700_000_000), "2023-11-14 22:13");
-        assert_eq!(format_date(951_782_400), "2000-02-29 00:00");
-    }
-}
-
 fn main() -> eframe::Result {
     // Path or config problems must never prevent the window from opening.
     let paths = AppPaths::detect().ok();
@@ -443,4 +431,16 @@ fn main() -> eframe::Result {
             )))
         }),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_date;
+
+    #[test]
+    fn formats_unix_dates() {
+        assert_eq!(format_date(0), "1970-01-01 00:00");
+        assert_eq!(format_date(1_700_000_000), "2023-11-14 22:13");
+        assert_eq!(format_date(951_782_400), "2000-02-29 00:00");
+    }
 }
