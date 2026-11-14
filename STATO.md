@@ -25,9 +25,12 @@ hc-library (SQLite: tags, favorites, filters, auto-delete rules, folder scan). U
 Hardware encoders (async MFT, software fallback), auto-delete at start, Privacy tab, hyperclips-cli
 (trim/merge/export/shrink/share; needs ffmpeg.exe, not bundled), Discord webhook upload.
 
+## Capture targets (CI green, untested on a PC)
+`[capture]` in config.toml: `monitor` (index, 0 = primary), `window_title` (first visible window containing the text; WGC only, resized windows handled), `region = [x, y, w, h]`. Selected at service start; no GUI picker yet.
+
 ## Still TO DO
 - GPU colour conversion, HEVC/AV1, HDR, fullscreen-exclusive edge cases.
-- Window / region / multi-monitor capture, per-process audio, webcam overlay, in-game overlay, bookmarks.
+- Per-process audio, webcam overlay, in-game overlay, bookmarks.
 - Graphical editor (the CLI covers trim/export), LAN share + QR, encrypted vault, WASM plugins, local API, backup/restore, local highlights.
 - LICENSE (GPL-3.0 text), Cargo.lock, tray icon, pipe DACL, start_with_windows, per-game profiles.
 

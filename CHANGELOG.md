@@ -3,6 +3,7 @@
 Every push to `main` publishes a release `v0.1.<run number>` (see `docs/RELEASING.md`); entries below are grouped by feature, newest first.
 
 ## Unreleased
+- Capture targets: choose the monitor (`capture.monitor`), a window by title (`capture.window_title`) or a crop region (`capture.region`).
 - Hardware H.264 encoders (NVENC/AMF/QSV) with automatic software fallback (`video.encoder`).
 - `hyperclips-cli`: list, trim, merge, export (MP4/WebM/GIF/WebP, 9:16, 1:1, speed), size shrink, Discord share (needs ffmpeg).
 - Auto-delete rules (`[storage]`), Privacy tab.
