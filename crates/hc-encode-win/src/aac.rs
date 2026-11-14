@@ -25,6 +25,10 @@ pub struct AacEncoder {
     provides_samples: bool,
 }
 
+// SAFETY: the AAC MFT is an in-process, free-threaded (MTA) COM object. The encoder is only
+// ever used by one thread at a time (it is moved into the audio capture thread, never shared).
+unsafe impl Send for AacEncoder {}
+
 /// Media type describing the encoded AAC stream (also used for the MP4 sink).
 pub(crate) fn aac_type(info: &AudioInfo) -> Result<IMFMediaType> {
     // SAFETY: plain COM calls on an object created here.
