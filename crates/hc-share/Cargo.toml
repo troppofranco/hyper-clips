@@ -1,0 +1,16 @@
+[package]
+name = "hc-share"
+description = "User-initiated sharing: upload a clip to a Discord webhook"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+repository.workspace = true
+
+[dependencies]
+hc-core.workspace = true
+ureq.workspace = true
+
+[lints]
+workspace = true

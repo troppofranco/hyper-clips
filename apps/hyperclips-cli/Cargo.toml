@@ -1,0 +1,23 @@
+[package]
+name = "hyperclips-cli"
+description = "Command-line access to Hyper Clips: list, trim, merge, export, shrink, share"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+repository.workspace = true
+
+[[bin]]
+name = "hyperclips-cli"
+path = "src/main.rs"
+
+[dependencies]
+hc-core.workspace = true
+hc-library.workspace = true
+hc-export.workspace = true
+hc-share.workspace = true
+anyhow.workspace = true
+
+[lints]
+workspace = true

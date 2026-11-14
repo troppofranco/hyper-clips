@@ -80,6 +80,15 @@ pub struct Audio {
     pub bitrate_kbps: u32,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct Share {
+    /// Discord webhook URL used by `hyperclips-cli share` (stored in plain text: keep the file private).
+    pub discord_webhook: String,
+    /// Folder containing `ffmpeg.exe` (empty = next to the program, then PATH).
+    pub ffmpeg_dir: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Games {
@@ -137,6 +146,7 @@ pub struct Config {
     pub video: Video,
     pub audio: Audio,
     pub games: Games,
+    pub share: Share,
     pub storage: Storage,
     pub updates: Updates,
     pub hotkeys: Hotkeys,

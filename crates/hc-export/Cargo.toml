@@ -1,0 +1,15 @@
+[package]
+name = "hc-export"
+description = "Trim, merge, crop, speed and export clips by driving an external ffmpeg (argument builders + runner)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+repository.workspace = true
+
+[dependencies]
+hc-core.workspace = true
+
+[lints]
+workspace = true

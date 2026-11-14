@@ -7,9 +7,12 @@ members = [
     "crates/hc-capture-win",
     "crates/hc-audio-win",
     "crates/hc-library",
+    "crates/hc-export",
+    "crates/hc-share",
     "crates/hc-encode-win",
     "crates/hc-updater",
     "apps/hc-updater-helper",
+    "apps/hyperclips-cli",
     "apps/hyperclips",
     "apps/hyperclips-ui",
 ]
@@ -28,6 +31,8 @@ hc-buffer = { path = "crates/hc-buffer" }
 hc-capture-win = { path = "crates/hc-capture-win" }
 hc-audio-win = { path = "crates/hc-audio-win" }
 hc-library = { path = "crates/hc-library" }
+hc-export = { path = "crates/hc-export" }
+hc-share = { path = "crates/hc-share" }
 hc-encode-win = { path = "crates/hc-encode-win" }
 hc-updater = { path = "crates/hc-updater" }
 
