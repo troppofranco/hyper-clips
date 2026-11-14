@@ -6,6 +6,7 @@ members = [
     "crates/hc-buffer",
     "crates/hc-capture-win",
     "crates/hc-audio-win",
+    "crates/hc-library",
     "crates/hc-encode-win",
     "crates/hc-updater",
     "apps/hc-updater-helper",
@@ -26,6 +27,7 @@ hc-os-win = { path = "crates/hc-os-win" }
 hc-buffer = { path = "crates/hc-buffer" }
 hc-capture-win = { path = "crates/hc-capture-win" }
 hc-audio-win = { path = "crates/hc-audio-win" }
+hc-library = { path = "crates/hc-library" }
 hc-encode-win = { path = "crates/hc-encode-win" }
 hc-updater = { path = "crates/hc-updater" }
 
@@ -38,6 +40,7 @@ ureq = { version = "2", default-features = false, features = ["tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
+rusqlite = { version = "0.32", features = ["bundled"] }
 toml = "0.8"
 tracing = "0.1"
 tracing-appender = "0.2"

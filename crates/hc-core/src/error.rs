@@ -16,6 +16,8 @@ pub enum Error {
     Invalid(String),
     #[error("another instance is already running")]
     AlreadyRunning,
+    #[error("database error: {0}")]
+    Database(String),
     #[error("system error: {0}")]
     System(String),
 }
