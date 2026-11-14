@@ -312,8 +312,7 @@ fn open_duplication(device: &ID3D11Device) -> Result<(IDXGIOutputDuplication, u3
         let dup = output1
             .DuplicateOutput(device)
             .map_err(|e| sys("DuplicateOutput", e))?;
-        let desc: DXGI_OUTDUPL_DESC;
-        desc = dup.GetDesc();
+        let desc = dup.GetDesc();
         Ok((dup, desc.ModeDesc.Width, desc.ModeDesc.Height))
     }
 }
