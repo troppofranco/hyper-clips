@@ -64,6 +64,8 @@ pub struct Privacy {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Video {
+    /// `auto` (GPU encoder when available, else software), `hardware` or `software`.
+    pub encoder: String,
     pub fps: u32,
     pub bitrate_kbps: u32,
 }
@@ -145,6 +147,7 @@ impl Default for Video {
     fn default() -> Self {
         // The Phase 2 encoder is software H.264, so the default stays modest.
         Self {
+            encoder: "auto".into(),
             fps: 30,
             bitrate_kbps: 8000,
         }
@@ -226,6 +229,11 @@ impl Config {
             return Err(Error::Invalid(format!(
                 "video.fps must be {MIN_FPS}..={MAX_FPS}"
             )));
+        }
+        if !["auto", "hardware", "software"].contains(&self.video.encoder.as_str()) {
+            return Err(Error::Invalid(
+                "video.encoder must be auto, hardware or software".into(),
+            ));
         }
         if ![96, 128, 160, 192].contains(&self.audio.bitrate_kbps) {
             return Err(Error::Invalid(

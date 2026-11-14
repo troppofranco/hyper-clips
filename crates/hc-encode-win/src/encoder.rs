@@ -23,6 +23,10 @@ pub struct H264Encoder {
     info: VideoInfo,
     frame_duration: i64,
     provides_samples: bool,
+    /// Set for asynchronous (hardware) MFTs, which signal NeedInput / HaveOutput events.
+    events: Option<IMFMediaEventGenerator>,
+    need_input: u32,
+    hardware: bool,
     output_size: u32,
     nv12: Vec<u8>,
 }
@@ -37,6 +41,95 @@ impl H264Encoder {
         gop_frames: u32,
     ) -> Result<Self> {
         crate::mf::init()?;
+        // SAFETY: standard COM activation of an in-process MFT.
+        let transform: IMFTransform =
+            unsafe { CoCreateInstance(&MS_H264_ENCODER, None, CLSCTX_INPROC_SERVER) }
+                .map_err(|e| sys("create H.264 encoder", e))?;
+        Self::configure(
+            transform,
+            false,
+            width,
+            height,
+            fps,
+            bitrate_bps,
+            gop_frames,
+        )
+    }
+
+    /// Tries the GPU encoders (NVENC / AMF / QuickSync exposed as asynchronous MFTs) in the
+    /// order Windows ranks them. Fails when none of them accepts the configuration; the caller
+    /// then falls back to [`H264Encoder::new_software`].
+    pub fn new_hardware(
+        width: u32,
+        height: u32,
+        fps: u32,
+        bitrate_bps: u32,
+        gop_frames: u32,
+    ) -> Result<Self> {
+        crate::mf::init()?;
+        let output = MFT_REGISTER_TYPE_INFO {
+            guidMajorType: MFMediaType_Video,
+            guidSubtype: MFVideoFormat_H264,
+        };
+        let mut activates: *mut Option<IMFActivate> = std::ptr::null_mut();
+        let mut count = 0u32;
+        // SAFETY: valid out-pointers; the returned array is read within `count` and then
+        // freed with CoTaskMemFree, after taking ownership of each element.
+        let candidates: Vec<IMFActivate> = unsafe {
+            MFTEnumEx(
+                MFT_CATEGORY_VIDEO_ENCODER,
+                MFT_ENUM_FLAG_HARDWARE | MFT_ENUM_FLAG_SORTANDFILTER,
+                None,
+                Some(&output),
+                &mut activates,
+                &mut count,
+            )
+            .map_err(|e| sys("MFTEnumEx", e))?;
+            let mut found = Vec::new();
+            for i in 0..count as usize {
+                if let Some(a) = std::ptr::read(activates.add(i)) {
+                    found.push(a);
+                }
+            }
+            if !activates.is_null() {
+                windows::Win32::System::Com::CoTaskMemFree(Some(activates as *const _));
+            }
+            found
+        };
+        let mut last_error = Error::System("no hardware H.264 encoder found".into());
+        for activate in candidates {
+            // SAFETY: activating an MFT from its enumerated activation object.
+            let transform: IMFTransform = match unsafe { activate.ActivateObject() } {
+                Ok(t) => t,
+                Err(e) => {
+                    last_error = sys("activate hardware encoder", e);
+                    continue;
+                }
+            };
+            match Self::configure(transform, true, width, height, fps, bitrate_bps, gop_frames) {
+                Ok(encoder) => return Ok(encoder),
+                Err(e) => {
+                    tracing::debug!("hardware encoder rejected: {e}");
+                    last_error = e;
+                }
+            }
+        }
+        Err(last_error)
+    }
+
+    pub fn is_hardware(&self) -> bool {
+        self.hardware
+    }
+
+    fn configure(
+        transform: IMFTransform,
+        hardware: bool,
+        width: u32,
+        height: u32,
+        fps: u32,
+        bitrate_bps: u32,
+        gop_frames: u32,
+    ) -> Result<Self> {
         let mut info = VideoInfo {
             width,
             height,
@@ -44,16 +137,32 @@ impl H264Encoder {
             bitrate_bps,
             sequence_header: Vec::new(),
         };
-
-        // SAFETY: standard COM activation of an in-process MFT.
-        let transform: IMFTransform =
-            unsafe { CoCreateInstance(&MS_H264_ENCODER, None, CLSCTX_INPROC_SERVER) }
-                .map_err(|e| sys("create H.264 encoder", e))?;
+        let mut events = None;
 
         // SAFETY: COM calls on the transform created above; media types are built here.
         unsafe {
-            // Best-effort tuning: low latency, no B-frames, regular keyframes.
+            if hardware {
+                // Asynchronous MFTs must be unlocked before use.
+                let attrs = transform
+                    .GetAttributes()
+                    .map_err(|e| sys("MFT attributes", e))?;
+                attrs
+                    .SetUINT32(&MF_TRANSFORM_ASYNC_UNLOCK, 1)
+                    .map_err(|e| sys("async unlock", e))?;
+                let _ = attrs.SetUINT32(&MF_LOW_LATENCY, 1);
+                events = Some(
+                    transform
+                        .cast::<IMFMediaEventGenerator>()
+                        .map_err(|e| sys("event generator", e))?,
+                );
+            }
+            // Best-effort tuning: low latency, no B-frames, regular keyframes, CBR.
             if let Ok(api) = transform.cast::<ICodecAPI>() {
+                let _ = api.SetValue(&CODECAPI_AVEncCommonRateControlMode, &VARIANT::from(0u32));
+                let _ = api.SetValue(
+                    &CODECAPI_AVEncCommonMeanBitRate,
+                    &VARIANT::from(bitrate_bps),
+                );
                 let _ = api.SetValue(&CODECAPI_AVLowLatencyMode, &VARIANT::from(true));
                 let _ = api.SetValue(&CODECAPI_AVEncMPVDefaultBPictureCount, &VARIANT::from(0u32));
                 let _ = api.SetValue(&CODECAPI_AVEncMPVGOPSize, &VARIANT::from(gop_frames));
@@ -117,6 +226,9 @@ impl H264Encoder {
             info,
             frame_duration: 10_000_000 / i64::from(fps.max(1)),
             provides_samples,
+            events,
+            need_input: 0,
+            hardware,
             output_size: stream.cbSize.max(1 << 20),
             nv12: Vec::with_capacity(nv12_size(width, height)),
         })
@@ -183,12 +295,15 @@ impl H264Encoder {
             sample
         };
 
+        if self.events.is_some() {
+            return self.feed_async(&sample, out);
+        }
         // SAFETY: valid sample for stream 0.
         let first = unsafe { self.transform.ProcessInput(0, &sample, 0) };
         if let Err(e) = first {
             if e.code() == MF_E_NOTACCEPTING {
                 // Output is pending: drain it, then submit again.
-                self.drain(out)?;
+                self.drain(out, false)?;
                 // SAFETY: as above.
                 unsafe { self.transform.ProcessInput(0, &sample, 0) }
                     .map_err(|e| sys("ProcessInput", e))?;
@@ -196,11 +311,11 @@ impl H264Encoder {
                 return Err(sys("ProcessInput", e));
             }
         }
-        self.drain(out)
+        self.drain(out, false)
     }
 
     /// Pulls every packet the encoder has ready.
-    fn drain(&mut self, out: &mut Vec<Packet>) -> Result<()> {
+    fn drain(&mut self, out: &mut Vec<Packet>, once: bool) -> Result<()> {
         loop {
             // SAFETY: the output buffer array and status are valid for the call; the sample
             // inside is moved out with `ManuallyDrop::take` exactly once.
@@ -239,6 +354,53 @@ impl H264Encoder {
                     self.info.sequence_header = annexb::sequence_header(&packet.data);
                 }
                 out.push(packet);
+                if once {
+                    return Ok(());
+                }
+            }
+        }
+    }
+
+    /// Asynchronous MFT: wait until it asks for input, submit, then collect ready output.
+    fn feed_async(&mut self, sample: &IMFSample, out: &mut Vec<Packet>) -> Result<()> {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(500);
+        while self.need_input == 0 {
+            self.pump(out)?;
+            if self.need_input == 0 {
+                if std::time::Instant::now() > deadline {
+                    return Err(Error::System(
+                        "hardware encoder stopped asking for input".into(),
+                    ));
+                }
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+        }
+        // SAFETY: valid sample for stream 0, submitted only after a NeedInput event.
+        unsafe { self.transform.ProcessInput(0, sample, 0) }
+            .map_err(|e| sys("hardware ProcessInput", e))?;
+        self.need_input -= 1;
+        self.pump(out)
+    }
+
+    /// Handles every queued MFT event without blocking.
+    fn pump(&mut self, out: &mut Vec<Packet>) -> Result<()> {
+        // Event type numbers: METransformNeedInput = 601, METransformHaveOutput = 602.
+        let Some(events) = self.events.clone() else {
+            return Ok(());
+        };
+        loop {
+            // SAFETY: plain COM call; NO_WAIT returns immediately.
+            let event = match unsafe { events.GetEvent(MF_EVENT_FLAG_NO_WAIT) } {
+                Ok(e) => e,
+                Err(e) if e.code() == MF_E_NO_EVENTS_AVAILABLE => return Ok(()),
+                Err(e) => return Err(sys("GetEvent", e)),
+            };
+            // SAFETY: plain COM call.
+            let kind = unsafe { event.GetType() }.map_err(|e| sys("event type", e))?;
+            match kind {
+                601 => self.need_input += 1,
+                602 => self.drain(out, true)?,
+                _ => {}
             }
         }
     }

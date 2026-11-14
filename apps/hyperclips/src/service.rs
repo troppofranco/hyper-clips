@@ -13,7 +13,7 @@ use hc_library::{Library, NewClip};
 use hc_os_win::tray::{self, TrayEvent, TrayLabels};
 use hc_os_win::{clock, foreground, instance, locale, memory::WinMemoryProbe, pipe, sound};
 
-use crate::pipeline::{Pipeline, PipelineSettings};
+use crate::pipeline::{EncoderChoice, Pipeline, PipelineSettings};
 use crate::update::UpdateCtx;
 use std::path::PathBuf;
 use std::process::{Child, Command};
@@ -233,6 +233,7 @@ pub fn run() -> Result<()> {
             fps: config.video.fps,
             bitrate_bps: config.video.bitrate_kbps.saturating_mul(1000),
             replay_secs: config.replay.duration_secs,
+            encoder: EncoderChoice::parse(&config.video.encoder),
             audio_system: config.audio.system,
             audio_mic: config.audio.microphone,
             audio_bitrate_bps: config.audio.bitrate_kbps.saturating_mul(1000),

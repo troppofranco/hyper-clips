@@ -20,11 +20,29 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EncoderChoice {
+    Auto,
+    Hardware,
+    Software,
+}
+
+impl EncoderChoice {
+    pub fn parse(s: &str) -> Self {
+        match s {
+            "hardware" => Self::Hardware,
+            "software" => Self::Software,
+            _ => Self::Auto,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct PipelineSettings {
     pub fps: u32,
     pub bitrate_bps: u32,
     pub replay_secs: u32,
+    pub encoder: EncoderChoice,
     pub audio_system: bool,
     pub audio_mic: bool,
     pub audio_bitrate_bps: u32,
@@ -367,6 +385,25 @@ fn start_audio_track(
     })
 }
 
+fn open_encoder(
+    choice: EncoderChoice,
+    w: u32,
+    h: u32,
+    fps: u32,
+    bitrate_bps: u32,
+) -> Result<H264Encoder> {
+    if choice != EncoderChoice::Software {
+        match H264Encoder::new_hardware(w, h, fps, bitrate_bps, fps) {
+            Ok(e) => return Ok(e),
+            Err(e) if choice == EncoderChoice::Auto => {
+                tracing::info!("no usable hardware encoder ({e}); using software");
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    H264Encoder::new_software(w, h, fps, bitrate_bps, fps)
+}
+
 fn encode_loop(
     settings: PipelineSettings,
     started: Instant,
@@ -399,10 +436,15 @@ fn encode_loop(
 
         if encoder.is_none() {
             let (w, h) = (frame.width & !1, frame.height & !1);
-            match H264Encoder::new_software(w, h, fps, settings.bitrate_bps, fps) {
+            match open_encoder(settings.encoder, w, h, fps, settings.bitrate_bps) {
                 Ok(e) => {
                     tracing::info!(
-                        "encoder ready: {w}x{h} @ {fps} fps, {} bps",
+                        "encoder ready ({}): {w}x{h} @ {fps} fps, {} bps",
+                        if e.is_hardware() {
+                            "hardware"
+                        } else {
+                            "software"
+                        },
                         settings.bitrate_bps
                     );
                     // A new stream (e.g. after a resolution change) cannot follow old packets.
