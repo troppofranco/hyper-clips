@@ -115,15 +115,15 @@ impl ClipSaver {
         let path = self
             .dir
             .join(format!("HyperClips_{}.mp4", clock::local_timestamp()));
-        let duration_ms = pipeline.save_clip(&path, self.secs)?;
-        self.record_in_library(&path, duration_ms);
+        let (duration_ms, marks) = pipeline.save_clip(&path, self.secs)?;
+        self.record_in_library(&path, duration_ms, &marks);
         Ok(path)
     }
 }
 
 impl ClipSaver {
     /// The file is already on disk: a library failure is logged, never fatal.
-    fn record_in_library(&self, path: &std::path::Path, duration_ms: i64) {
+    fn record_in_library(&self, path: &std::path::Path, duration_ms: i64, marks: &[i64]) {
         let Some(lib) = &self.library else { return };
         let size = std::fs::metadata(path).map_or(0, |m| m.len() as i64);
         let now = std::time::SystemTime::now()
@@ -137,11 +137,16 @@ impl ClipSaver {
             game: self.games.as_ref().map(|g| g.current()).unwrap_or_default(),
         };
         match lib.lock() {
-            Ok(l) => {
-                if let Err(e) = l.add(&entry) {
-                    tracing::warn!("cannot record the clip in the library: {e}");
+            Ok(l) => match l.add(&entry) {
+                Ok(id) => {
+                    for ms in marks {
+                        if let Err(e) = l.add_bookmark(id, *ms) {
+                            tracing::warn!("cannot store a bookmark: {e}");
+                        }
+                    }
                 }
-            }
+                Err(e) => tracing::warn!("cannot record the clip in the library: {e}"),
+            },
             Err(_) => tracing::warn!("library lock poisoned"),
         }
     }
@@ -154,8 +159,8 @@ impl ClipSaver {
             .ok_or_else(|| anyhow::anyhow!("capture is not running (see the log)"))?;
         if pipeline.is_recording() {
             let stopped = pipeline.stop_recording()?;
-            return Ok(stopped.map(|(path, ms)| {
-                self.record_in_library(&path, ms);
+            return Ok(stopped.map(|(path, ms, marks)| {
+                self.record_in_library(&path, ms, &marks);
                 path
             }));
         }
@@ -164,6 +169,10 @@ impl ClipSaver {
             .join(format!("HyperClips_{}_rec.mp4", clock::local_timestamp()));
         pipeline.start_recording(path)?;
         Ok(None)
+    }
+
+    fn bookmark(&self) -> bool {
+        self.pipeline.as_ref().is_some_and(|p| p.add_bookmark())
     }
 
     fn screenshot(&self) -> Result<PathBuf> {
@@ -458,6 +467,13 @@ pub fn run() -> Result<()> {
             }
         }
         TrayEvent::CheckUpdates => event_updater.spawn_check(true),
+        TrayEvent::Hotkey(HotkeyAction::Bookmark) => {
+            if event_saver.bookmark() {
+                sound::beep_ok();
+            } else {
+                sound::beep_error();
+            }
+        }
         TrayEvent::Hotkey(HotkeyAction::Screenshot) => {
             let saver = Arc::clone(&event_saver);
             let spawned = std::thread::Builder::new()

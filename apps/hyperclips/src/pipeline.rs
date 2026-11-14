@@ -122,6 +122,9 @@ pub struct Pipeline {
     info: Arc<Mutex<Option<VideoInfo>>>,
     rec: Arc<Mutex<Recorder>>,
     latest: LatestFrame,
+    origin: Instant,
+    /// Bookmarked moments on the shared clock (100 ns ticks since `origin`).
+    bookmarks: Mutex<Vec<i64>>,
     stop: Arc<AtomicBool>,
     capture: Mutex<Option<ScreenCapture>>,
     /// One per audio track (track index = position + 1).
@@ -218,6 +221,8 @@ impl Pipeline {
             info,
             rec,
             latest,
+            origin,
+            bookmarks: Mutex::new(Vec::new()),
             stop,
             capture: Mutex::new(Some(capture)),
             audio_infos,
@@ -227,7 +232,7 @@ impl Pipeline {
     }
 
     /// Writes the last `secs` seconds to `path` as MP4. Muxing runs on the calling thread.
-    pub fn save_clip(&self, path: &Path, secs: u32) -> Result<i64> {
+    pub fn save_clip(&self, path: &Path, secs: u32) -> Result<(i64, Vec<i64>)> {
         let snapshot = self
             .buffer
             .lock()
@@ -249,7 +254,34 @@ impl Pipeline {
             path.display(),
             snapshot.duration() as f64 / TICKS_PER_SEC as f64
         );
-        Ok(snapshot.duration() / (TICKS_PER_SEC / 1000))
+        let end = snapshot.start_pts + snapshot.duration();
+        let marks = self.bookmarks_between(snapshot.start_pts, end);
+        Ok((snapshot.duration() / (TICKS_PER_SEC / 1000), marks))
+    }
+
+    /// Marks "now" so the moment can be found later; returns false if the list is full.
+    pub fn add_bookmark(&self) -> bool {
+        let now = (self.origin.elapsed().as_nanos() / 100) as i64;
+        match self.bookmarks.lock() {
+            Ok(mut b) if b.len() < 1000 => {
+                b.push(now);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Bookmarks inside `[from, to]` (shared-clock ticks) as milliseconds from `from`.
+    fn bookmarks_between(&self, from: i64, to: i64) -> Vec<i64> {
+        self.bookmarks.lock().map_or_else(
+            |_| Vec::new(),
+            |b| {
+                b.iter()
+                    .filter(|t| **t >= from && **t <= to)
+                    .map(|t| (*t - from) / (TICKS_PER_SEC / 1000))
+                    .collect()
+            },
+        )
     }
 
     pub fn is_recording(&self) -> bool {
@@ -275,7 +307,7 @@ impl Pipeline {
     }
 
     /// Stops the recording; returns the file and its length in ms (None if it never started).
-    pub fn stop_recording(&self) -> Result<Option<(PathBuf, i64)>> {
+    pub fn stop_recording(&self) -> Result<Option<(PathBuf, i64, Vec<i64>)>> {
         let mut r = self
             .rec
             .lock()
@@ -285,8 +317,9 @@ impl Pipeline {
             return Ok(None);
         };
         let ms = (r.last_video_pts - r.origin) / (TICKS_PER_SEC / 1000);
+        let marks = self.bookmarks_between(r.origin, r.last_video_pts);
         writer.finish()?;
-        Ok(Some((path, ms.max(0))))
+        Ok(Some((path, ms.max(0), marks)))
     }
 
     /// Writes the newest captured frame to `path` as PNG.

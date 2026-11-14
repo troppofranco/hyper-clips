@@ -51,6 +51,7 @@ pub struct Hotkeys {
     pub save_clip: String,
     pub toggle_recording: String,
     pub screenshot: String,
+    pub bookmark: String,
     pub open_ui: String,
 }
 
@@ -215,6 +216,7 @@ impl Default for Hotkeys {
             save_clip: "Alt+F10".into(),
             toggle_recording: "Alt+F9".into(),
             screenshot: "Alt+F8".into(),
+            bookmark: "Alt+F7".into(),
             open_ui: "Ctrl+Alt+H".into(),
         }
     }
@@ -234,6 +236,7 @@ impl Hotkeys {
             HotkeyAction::SaveClip => &self.save_clip,
             HotkeyAction::ToggleRecording => &self.toggle_recording,
             HotkeyAction::Screenshot => &self.screenshot,
+            HotkeyAction::Bookmark => &self.bookmark,
             HotkeyAction::OpenUi => &self.open_ui,
         }
     }

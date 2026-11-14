@@ -63,12 +63,17 @@ fn main() -> Result<()> {
             let lib = Library::open(&paths.data_dir().join("library.db"))?;
             for c in lib.list(&filter)? {
                 println!(
-                    "{}\t{}{}\t{} MB\t{}",
+                    "{}\t{}{}\t{} MB\t{}\t{}",
                     c.id,
                     if c.favorite { "* " } else { "" },
                     c.path,
                     c.size_bytes / 1_048_576,
-                    c.game
+                    c.game,
+                    c.bookmarks
+                        .iter()
+                        .map(|ms| format!("{}:{:02}", ms / 60_000, ms / 1000 % 60))
+                        .collect::<Vec<_>>()
+                        .join(",")
                 );
             }
         }

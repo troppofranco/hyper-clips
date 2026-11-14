@@ -281,6 +281,18 @@ impl App {
                         delete = Some((clip.id, clip.path.clone()));
                     }
                 });
+                if !clip.bookmarks.is_empty() {
+                    let marks: Vec<String> = clip
+                        .bookmarks
+                        .iter()
+                        .map(|ms| format!("{}:{:02}", ms / 60_000, ms / 1000 % 60))
+                        .collect();
+                    ui.weak(format!(
+                        "   {}: {}",
+                        self.tr.t("lib_bookmarks"),
+                        marks.join("  ")
+                    ));
+                }
                 if !clip.tags.is_empty() {
                     ui.weak(format!("   #{}", clip.tags.join(" #")));
                 }

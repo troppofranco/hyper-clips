@@ -28,6 +28,8 @@ pub struct Clip {
     pub game: String,
     pub favorite: bool,
     pub tags: Vec<String>,
+    /// Bookmarked moments, in milliseconds from the start of the clip.
+    pub bookmarks: Vec<i64>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -85,6 +87,11 @@ impl Library {
                  tag TEXT NOT NULL,
                  PRIMARY KEY (clip_id, tag)
              );
+             CREATE TABLE IF NOT EXISTS clip_bookmarks (
+                 clip_id INTEGER NOT NULL REFERENCES clips(id) ON DELETE CASCADE,
+                 ms INTEGER NOT NULL,
+                 PRIMARY KEY (clip_id, ms)
+             );
              CREATE INDEX IF NOT EXISTS idx_clips_created ON clips(created_at);",
         )
         .map_err(db)?;
@@ -127,6 +134,7 @@ impl Library {
         match row {
             Some(mut clip) => {
                 clip.tags = self.tags_of(clip.id)?;
+                clip.bookmarks = self.bookmarks_of(clip.id)?;
                 Ok(Some(clip))
             }
             None => Ok(None),
@@ -172,6 +180,7 @@ impl Library {
         for row in rows {
             let mut clip = row.map_err(db)?;
             clip.tags = self.tags_of(clip.id)?;
+            clip.bookmarks = self.bookmarks_of(clip.id)?;
             clips.push(clip);
         }
         Ok(clips)
@@ -185,6 +194,25 @@ impl Library {
         let rows = stmt
             .query_map([id], |r| r.get::<_, String>(0))
             .map_err(db)?;
+        rows.collect::<std::result::Result<Vec<_>, _>>().map_err(db)
+    }
+
+    pub fn add_bookmark(&self, id: i64, ms: i64) -> Result<()> {
+        self.conn
+            .execute(
+                "INSERT OR IGNORE INTO clip_bookmarks (clip_id, ms) VALUES (?1, ?2)",
+                params![id, ms.max(0)],
+            )
+            .map_err(db)?;
+        Ok(())
+    }
+
+    fn bookmarks_of(&self, id: i64) -> Result<Vec<i64>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT ms FROM clip_bookmarks WHERE clip_id = ?1 ORDER BY ms")
+            .map_err(db)?;
+        let rows = stmt.query_map([id], |r| r.get::<_, i64>(0)).map_err(db)?;
         rows.collect::<std::result::Result<Vec<_>, _>>().map_err(db)
     }
 
@@ -343,6 +371,7 @@ fn row_to_clip(r: &rusqlite::Row<'_>) -> rusqlite::Result<Clip> {
         game: r.get(5)?,
         favorite: r.get::<_, i64>(6)? != 0,
         tags: Vec::new(),
+        bookmarks: Vec::new(),
     })
 }
 
@@ -480,6 +509,16 @@ mod tests {
         };
         let c = lib.auto_delete_candidates(rules, 10).unwrap();
         assert_eq!(c.iter().map(|x| x.0).collect::<Vec<_>>(), vec![a]);
+    }
+
+    #[test]
+    fn bookmarks_are_stored_sorted_and_deduplicated() {
+        let lib = Library::open_in_memory().unwrap();
+        let id = lib.add(&clip("a.mp4", 1, 1, "")).unwrap();
+        lib.add_bookmark(id, 5000).unwrap();
+        lib.add_bookmark(id, 1000).unwrap();
+        lib.add_bookmark(id, 5000).unwrap();
+        assert_eq!(lib.get(id).unwrap().unwrap().bookmarks, vec![1000, 5000]);
     }
 
     #[test]

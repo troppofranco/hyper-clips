@@ -16,14 +16,16 @@ pub enum HotkeyAction {
     SaveClip,
     ToggleRecording,
     Screenshot,
+    Bookmark,
     OpenUi,
 }
 
 impl HotkeyAction {
-    pub const ALL: [HotkeyAction; 4] = [
+    pub const ALL: [HotkeyAction; 5] = [
         HotkeyAction::SaveClip,
         HotkeyAction::ToggleRecording,
         HotkeyAction::Screenshot,
+        HotkeyAction::Bookmark,
         HotkeyAction::OpenUi,
     ];
 
@@ -33,6 +35,7 @@ impl HotkeyAction {
             HotkeyAction::SaveClip => "save_clip",
             HotkeyAction::ToggleRecording => "toggle_recording",
             HotkeyAction::Screenshot => "screenshot",
+            HotkeyAction::Bookmark => "bookmark",
             HotkeyAction::OpenUi => "open_ui",
         }
     }
