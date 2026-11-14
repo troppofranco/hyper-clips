@@ -16,6 +16,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
+use windows::core::BOOL;
 use windows::core::{factory, IInspectable, Interface};
 use windows::Foundation::TypedEventHandler;
 use windows::Graphics::Capture::{
@@ -24,7 +25,7 @@ use windows::Graphics::Capture::{
 };
 use windows::Graphics::DirectX::Direct3D11::IDirect3DDevice;
 use windows::Graphics::DirectX::DirectXPixelFormat;
-use windows::Win32::Foundation::{BOOL, HMODULE, HWND, LPARAM, POINT, RECT};
+use windows::Win32::Foundation::{HMODULE, HWND, LPARAM, POINT, RECT};
 use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_HARDWARE;
 use windows::Win32::Graphics::Direct3D11::{
     D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D, D3D11_CPU_ACCESS_READ,
@@ -125,6 +126,19 @@ fn monitor_handle(index: u32) -> Result<HMONITOR> {
         .get(index as usize - 1)
         .copied()
         .ok_or_else(|| Error::Invalid(format!("monitor {index} does not exist")))
+}
+
+/// Carries the WinRT device into the frame callback.
+struct SendDevice(IDirect3DDevice);
+
+// SAFETY: IDirect3DDevice wraps a free-threaded D3D11 device; the callback only passes it to
+// `Recreate`, one call at a time.
+unsafe impl Send for SendDevice {}
+
+impl SendDevice {
+    fn get(&self) -> &IDirect3DDevice {
+        &self.0
+    }
 }
 
 type Sink = Arc<Mutex<Box<dyn FnMut(Frame) + Send>>>;
@@ -343,7 +357,7 @@ fn start_wgc(
         staging: None,
     }));
     let handler_sink = Arc::clone(sink);
-    let handler_device = winrt_device.clone();
+    let handler_device = SendDevice(winrt_device.clone());
     let last_size = Arc::new(Mutex::new((size.Width, size.Height)));
     let handler =
         TypedEventHandler::<Direct3D11CaptureFramePool, IInspectable>::new(move |pool, _| {
@@ -365,7 +379,7 @@ fn start_wgc(
                 {
                     *last = (content.Width, content.Height);
                     let _ = pool.Recreate(
-                        &handler_device,
+                        handler_device.get(),
                         DirectXPixelFormat::B8G8R8A8UIntNormalized,
                         2,
                         content,
