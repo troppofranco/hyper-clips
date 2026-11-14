@@ -405,7 +405,7 @@ fn open_encoder(
 }
 
 fn encode_loop(
-    settings: PipelineSettings,
+    mut settings: PipelineSettings,
     started: Instant,
     latest: &LatestFrame,
     buffer: &Mutex<ReplayBuffer>,
@@ -482,6 +482,10 @@ fn encode_loop(
             }
             Err(e) => {
                 tracing::warn!("encode failed, restarting the encoder: {e}");
+                // A GPU encoder that fails at runtime is not trusted again this session.
+                if enc.is_hardware() && settings.encoder == EncoderChoice::Auto {
+                    settings.encoder = EncoderChoice::Software;
+                }
                 encoder = None;
             }
         }
