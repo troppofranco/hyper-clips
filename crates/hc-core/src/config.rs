@@ -82,6 +82,17 @@ pub struct Audio {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(default)]
+pub struct Capture {
+    /// Monitor to record; 0 = primary.
+    pub monitor: u32,
+    /// Record the first visible window whose title contains this text (empty = whole monitor).
+    pub window_title: String,
+    /// Optional crop `[x, y, width, height]` in pixels of the captured image (empty = none).
+    pub region: Vec<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default)]
 pub struct Share {
     /// Discord webhook URL used by `hyperclips-cli share` (stored in plain text: keep the file private).
     pub discord_webhook: String,
@@ -147,6 +158,7 @@ pub struct Config {
     pub audio: Audio,
     pub games: Games,
     pub share: Share,
+    pub capture: Capture,
     pub storage: Storage,
     pub updates: Updates,
     pub hotkeys: Hotkeys,
@@ -261,6 +273,14 @@ impl Config {
             return Err(Error::Invalid(
                 "video.encoder must be auto, hardware or software".into(),
             ));
+        }
+        match self.capture.region.as_slice() {
+            [] => {}
+            [_, _, w, h] if *w >= 16 && *h >= 16 => {}
+            _ => return Err(Error::Invalid(
+                "capture.region must be empty or [x, y, width, height] with width and height >= 16"
+                    .into(),
+            )),
         }
         if ![96, 128, 160, 192].contains(&self.audio.bitrate_kbps) {
             return Err(Error::Invalid(

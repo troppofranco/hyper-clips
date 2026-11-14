@@ -13,6 +13,7 @@ pub mod pipe;
 pub mod shell;
 pub mod sound;
 pub mod tray;
+pub mod window;
 
 pub(crate) mod wide {
     use std::ffi::OsStr;

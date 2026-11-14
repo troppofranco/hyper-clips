@@ -228,12 +228,32 @@ pub fn run() -> Result<()> {
     let hotkeys = config.hotkeys.parsed()?;
 
     // Capture + replay buffer. A failure (no GPU, blocked capture) must not kill the tray.
+    let target = if config.capture.window_title.trim().is_empty() {
+        hc_capture_win::Target::Monitor(config.capture.monitor)
+    } else {
+        match hc_os_win::window::find_by_title(&config.capture.window_title) {
+            Some(hwnd) => hc_capture_win::Target::Window(hwnd),
+            None => {
+                tracing::warn!(
+                    "no window titled like {:?}; capturing the monitor instead",
+                    config.capture.window_title
+                );
+                hc_capture_win::Target::Monitor(config.capture.monitor)
+            }
+        }
+    };
+    let region = match config.capture.region.as_slice() {
+        [x, y, w, h] => Some([*x, *y, *w, *h]),
+        _ => None,
+    };
     let pipeline = if config.replay.enabled {
         match Pipeline::start(PipelineSettings {
             fps: config.video.fps,
             bitrate_bps: config.video.bitrate_kbps.saturating_mul(1000),
             replay_secs: config.replay.duration_secs,
             encoder: EncoderChoice::parse(&config.video.encoder),
+            target,
+            region,
             audio_system: config.audio.system,
             audio_mic: config.audio.microphone,
             audio_bitrate_bps: config.audio.bitrate_kbps.saturating_mul(1000),

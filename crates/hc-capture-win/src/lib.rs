@@ -24,7 +24,7 @@ use windows::Graphics::Capture::{
 };
 use windows::Graphics::DirectX::Direct3D11::IDirect3DDevice;
 use windows::Graphics::DirectX::DirectXPixelFormat;
-use windows::Win32::Foundation::{HMODULE, POINT};
+use windows::Win32::Foundation::{BOOL, HMODULE, HWND, LPARAM, POINT, RECT};
 use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_HARDWARE;
 use windows::Win32::Graphics::Direct3D11::{
     D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D, D3D11_CPU_ACCESS_READ,
@@ -36,7 +36,9 @@ use windows::Win32::Graphics::Dxgi::{
     IDXGIAdapter, IDXGIDevice, IDXGIOutput1, IDXGIOutputDuplication, IDXGIResource,
     DXGI_ERROR_ACCESS_LOST, DXGI_ERROR_WAIT_TIMEOUT, DXGI_OUTDUPL_FRAME_INFO,
 };
-use windows::Win32::Graphics::Gdi::{MonitorFromPoint, MONITOR_DEFAULTTOPRIMARY};
+use windows::Win32::Graphics::Gdi::{
+    EnumDisplayMonitors, MonitorFromPoint, HDC, HMONITOR, MONITOR_DEFAULTTOPRIMARY,
+};
 use windows::Win32::System::WinRT::Direct3D11::{
     CreateDirect3D11DeviceFromDXGIDevice, IDirect3DDxgiInterfaceAccess,
 };
@@ -55,6 +57,74 @@ pub struct Frame {
     pub bgra: Vec<u8>,
     /// Capture time in 100 ns ticks (monotonic, arbitrary origin).
     pub pts: i64,
+}
+
+/// What to capture.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Target {
+    /// Monitor by index; 0 is the primary monitor.
+    Monitor(u32),
+    /// A top-level window (raw HWND value). Needs Windows Graphics Capture.
+    Window(isize),
+}
+
+/// Copies the `w` x `h` rectangle at `(x, y)` out of a tightly packed BGRA image. The rectangle
+/// is clamped to the image; returns the cropped pixels and their size.
+pub fn crop_bgra(
+    src: &[u8],
+    sw: u32,
+    sh: u32,
+    x: u32,
+    y: u32,
+    w: u32,
+    h: u32,
+) -> (Vec<u8>, u32, u32) {
+    let x = x.min(sw.saturating_sub(1));
+    let y = y.min(sh.saturating_sub(1));
+    let w = w.min(sw - x).max(1);
+    let h = h.min(sh - y).max(1);
+    let mut out = Vec::with_capacity(w as usize * h as usize * 4);
+    for row in y..y + h {
+        let start = (row as usize * sw as usize + x as usize) * 4;
+        out.extend_from_slice(&src[start..start + w as usize * 4]);
+    }
+    (out, w, h)
+}
+
+unsafe extern "system" fn collect_monitor(
+    monitor: HMONITOR,
+    _dc: HDC,
+    _rect: *mut RECT,
+    data: LPARAM,
+) -> BOOL {
+    // SAFETY: `data` is the address of the Vec passed to EnumDisplayMonitors below.
+    let list = unsafe { &mut *(data.0 as *mut Vec<HMONITOR>) };
+    list.push(monitor);
+    BOOL(1)
+}
+
+/// Monitor handle for `index`; 0 is always the primary monitor.
+fn monitor_handle(index: u32) -> Result<HMONITOR> {
+    // SAFETY: default monitor lookup with a plain point.
+    let primary = unsafe { MonitorFromPoint(POINT { x: 0, y: 0 }, MONITOR_DEFAULTTOPRIMARY) };
+    if index == 0 {
+        return Ok(primary);
+    }
+    let mut all: Vec<HMONITOR> = Vec::new();
+    // SAFETY: the callback only pushes into `all`, which outlives the call.
+    let _ = unsafe {
+        EnumDisplayMonitors(
+            None,
+            None,
+            Some(collect_monitor),
+            LPARAM(&mut all as *mut _ as isize),
+        )
+    };
+    let others: Vec<HMONITOR> = all.into_iter().filter(|m| *m != primary).collect();
+    others
+        .get(index as usize - 1)
+        .copied()
+        .ok_or_else(|| Error::Invalid(format!("monitor {index} does not exist")))
 }
 
 type Sink = Arc<Mutex<Box<dyn FnMut(Frame) + Send>>>;
@@ -191,18 +261,23 @@ pub struct ScreenCapture {
 impl ScreenCapture {
     /// Starts capturing the primary monitor. `on_frame` runs on a background thread for
     /// every frame; keep it fast and never block in it.
-    pub fn start_primary_monitor(on_frame: impl FnMut(Frame) + Send + 'static) -> Result<Self> {
+    pub fn start(target: Target, on_frame: impl FnMut(Frame) + Send + 'static) -> Result<Self> {
         // SAFETY: plain FFI; failure (already initialised in another mode) is harmless.
         let _ = unsafe { RoInitialize(RO_INIT_MULTITHREADED) };
 
         let sink: Sink = Arc::new(Mutex::new(Box::new(on_frame)));
         let (device, context) = create_device()?;
 
-        match start_wgc(&device, &context, &sink) {
+        match start_wgc(&device, &context, &sink, target) {
             Ok(capture) => Ok(capture),
+            Err(e) if matches!(target, Target::Window(_)) => Err(e),
             Err(e) => {
                 tracing::warn!("Windows Graphics Capture unavailable without a border ({e}); using Desktop Duplication");
-                start_duplication(device, context, sink)
+                let index = match target {
+                    Target::Monitor(i) => i,
+                    Target::Window(_) => 0,
+                };
+                start_duplication(device, context, sink, index)
             }
         }
     }
@@ -221,6 +296,7 @@ fn start_wgc(
     device: &ID3D11Device,
     context: &ID3D11DeviceContext,
     sink: &Sink,
+    target: Target,
 ) -> Result<ScreenCapture> {
     let dxgi: IDXGIDevice = device.cast().map_err(|e| sys("IDXGIDevice", e))?;
     // SAFETY: `dxgi` is a valid DXGI device.
@@ -229,13 +305,15 @@ fn start_wgc(
     let winrt_device: IDirect3DDevice =
         inspectable.cast().map_err(|e| sys("IDirect3DDevice", e))?;
 
-    // SAFETY: default monitor lookup with a plain point.
-    let monitor = unsafe { MonitorFromPoint(POINT { x: 0, y: 0 }, MONITOR_DEFAULTTOPRIMARY) };
     let interop = factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>()
         .map_err(|e| sys("GraphicsCaptureItem factory", e))?;
-    // SAFETY: `monitor` is a valid monitor handle.
-    let item: GraphicsCaptureItem =
-        unsafe { interop.CreateForMonitor(monitor) }.map_err(|e| sys("CreateForMonitor", e))?;
+    // SAFETY: the handle comes from the OS (monitor) or from a window lookup by the caller.
+    let item: GraphicsCaptureItem = match target {
+        Target::Monitor(index) => unsafe { interop.CreateForMonitor(monitor_handle(index)?) }
+            .map_err(|e| sys("CreateForMonitor", e))?,
+        Target::Window(hwnd) => unsafe { interop.CreateForWindow(HWND(hwnd as *mut _)) }
+            .map_err(|e| sys("CreateForWindow", e))?,
+    };
     let size = item.Size().map_err(|e| sys("item size", e))?;
 
     let pool = Direct3D11CaptureFramePool::CreateFreeThreaded(
@@ -265,6 +343,8 @@ fn start_wgc(
         staging: None,
     }));
     let handler_sink = Arc::clone(sink);
+    let handler_device = winrt_device.clone();
+    let last_size = Arc::new(Mutex::new((size.Width, size.Height)));
     let handler =
         TypedEventHandler::<Direct3D11CaptureFramePool, IInspectable>::new(move |pool, _| {
             let Some(pool) = pool.as_ref() else {
@@ -276,9 +356,35 @@ fn start_wgc(
             // SAFETY: the surface wraps an ID3D11Texture2D.
             let texture: ID3D11Texture2D = unsafe { access.GetInterface()? };
             let pts = frame.SystemRelativeTime()?.Duration;
+            let content = frame.ContentSize()?;
+            // A resized window needs a pool of the new size (applies to the next frames).
+            if let Ok(mut last) = last_size.lock() {
+                if *last != (content.Width, content.Height)
+                    && content.Width > 0
+                    && content.Height > 0
+                {
+                    *last = (content.Width, content.Height);
+                    let _ = pool.Recreate(
+                        &handler_device,
+                        DirectXPixelFormat::B8G8R8A8UIntNormalized,
+                        2,
+                        content,
+                    );
+                }
+            }
             if let Ok(mut r) = reader.lock() {
                 match r.read_texture(&texture, pts) {
-                    Ok(f) => deliver(&handler_sink, f),
+                    Ok(mut f) => {
+                        // The texture can be larger than the content (window shrank).
+                        let (cw, ch) = (content.Width.max(1) as u32, content.Height.max(1) as u32);
+                        if cw < f.width || ch < f.height {
+                            let (bgra, w, h) = crop_bgra(&f.bgra, f.width, f.height, 0, 0, cw, ch);
+                            f.bgra = bgra;
+                            f.width = w;
+                            f.height = h;
+                        }
+                        deliver(&handler_sink, f);
+                    }
                     Err(e) => tracing::warn!("frame readback failed: {e}"),
                 }
             }
@@ -302,12 +408,27 @@ fn start_wgc(
     })
 }
 
-fn open_duplication(device: &ID3D11Device) -> Result<(IDXGIOutputDuplication, u32, u32)> {
+fn open_duplication(
+    device: &ID3D11Device,
+    monitor_index: u32,
+) -> Result<(IDXGIOutputDuplication, u32, u32)> {
     let dxgi: IDXGIDevice = device.cast().map_err(|e| sys("IDXGIDevice", e))?;
-    // SAFETY: plain COM calls on valid objects; output 0 is the primary monitor of the adapter.
+    let wanted = monitor_handle(monitor_index)?;
+    // SAFETY: plain COM calls on valid objects; the output whose monitor matches is used.
     unsafe {
         let adapter = dxgi.GetAdapter().map_err(|e| sys("GetAdapter", e))?;
-        let output = adapter.EnumOutputs(0).map_err(|e| sys("EnumOutputs", e))?;
+        let mut found = None;
+        let mut i = 0;
+        while let Ok(out) = adapter.EnumOutputs(i) {
+            if out.GetDesc().map_err(|e| sys("output desc", e))?.Monitor == wanted {
+                found = Some(out);
+                break;
+            }
+            i += 1;
+        }
+        let output = found.ok_or_else(|| {
+            Error::System("that monitor is not attached to the capture GPU".into())
+        })?;
         let output1: IDXGIOutput1 = output.cast().map_err(|e| sys("IDXGIOutput1", e))?;
         let dup = output1
             .DuplicateOutput(device)
@@ -321,13 +442,14 @@ fn start_duplication(
     device: ID3D11Device,
     context: ID3D11DeviceContext,
     sink: Sink,
+    monitor_index: u32,
 ) -> Result<ScreenCapture> {
-    let (dup, width, height) = open_duplication(&device)?;
+    let (dup, width, height) = open_duplication(&device, monitor_index)?;
     let stop = Arc::new(AtomicBool::new(false));
     let thread_stop = Arc::clone(&stop);
     let thread = std::thread::Builder::new()
         .name("hc-duplication".into())
-        .spawn(move || run_duplication(&device, context, dup, &sink, &thread_stop))
+        .spawn(move || run_duplication(&device, context, dup, monitor_index, &sink, &thread_stop))
         .map_err(|e| sys("cannot start the capture thread", e))?;
     tracing::info!("capture backend: DXGI Desktop Duplication");
     Ok(ScreenCapture {
@@ -345,6 +467,7 @@ fn run_duplication(
     device: &ID3D11Device,
     context: ID3D11DeviceContext,
     mut dup: IDXGIOutputDuplication,
+    monitor_index: u32,
     sink: &Sink,
     stop: &AtomicBool,
 ) {
@@ -386,7 +509,7 @@ fn run_duplication(
                         return;
                     }
                     std::thread::sleep(Duration::from_millis(500));
-                    if let Ok((new_dup, _, _)) = open_duplication(device) {
+                    if let Ok((new_dup, _, _)) = open_duplication(device, monitor_index) {
                         dup = new_dup;
                         break;
                     }
@@ -419,5 +542,33 @@ impl Drop for ScreenCapture {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::crop_bgra;
+
+    fn image(w: u32, h: u32) -> Vec<u8> {
+        (0..w * h).flat_map(|i| [i as u8, 0, 0, 255]).collect()
+    }
+
+    #[test]
+    fn crops_the_requested_rectangle() {
+        let img = image(4, 3);
+        let (out, w, h) = crop_bgra(&img, 4, 3, 1, 1, 2, 2);
+        assert_eq!((w, h), (2, 2));
+        // pixel (1,1) has index 5, (2,1) = 6, (1,2) = 9, (2,2) = 10
+        let firsts: Vec<u8> = out.chunks(4).map(|p| p[0]).collect();
+        assert_eq!(firsts, vec![5, 6, 9, 10]);
+    }
+
+    #[test]
+    fn rectangle_is_clamped_to_the_image() {
+        let img = image(4, 3);
+        let (out, w, h) = crop_bgra(&img, 4, 3, 3, 2, 10, 10);
+        assert_eq!((w, h), (1, 1));
+        assert_eq!(out.len(), 4);
     }
 }

@@ -8,7 +8,7 @@ use hc_audio_win::timeline::Timeline;
 use hc_audio_win::{AudioCapture, Source};
 use hc_buffer::Packet;
 use hc_buffer::{ReplayBuffer, TICKS_PER_SEC};
-use hc_capture_win::{Frame, ScreenCapture};
+use hc_capture_win::{crop_bgra, Frame, ScreenCapture, Target};
 use hc_core::error::{Error, Result};
 use hc_encode_win::aac::AacEncoder;
 use hc_encode_win::encoder::H264Encoder;
@@ -43,6 +43,9 @@ pub struct PipelineSettings {
     pub bitrate_bps: u32,
     pub replay_secs: u32,
     pub encoder: EncoderChoice,
+    pub target: Target,
+    /// Optional crop `[x, y, width, height]`.
+    pub region: Option<[u32; 4]>,
     pub audio_system: bool,
     pub audio_mic: bool,
     pub audio_bitrate_bps: u32,
@@ -151,13 +154,23 @@ impl Pipeline {
         let rec = Arc::new(Mutex::new(Recorder::default()));
 
         let slot = Arc::clone(&latest);
-        let capture = ScreenCapture::start_primary_monitor(move |frame| {
+        let region = settings.region;
+        let capture = ScreenCapture::start(settings.target, move |mut frame| {
+            if let Some([x, y, w, h]) = region {
+                if x < frame.width && y < frame.height {
+                    let (bgra, cw, ch) =
+                        crop_bgra(&frame.bgra, frame.width, frame.height, x, y, w, h);
+                    frame.bgra = bgra;
+                    frame.width = cw;
+                    frame.height = ch;
+                }
+            }
             if let Ok(mut guard) = slot.lock() {
                 *guard = Some(Arc::new(frame));
             }
         })?;
         let (w, h) = capture.size();
-        tracing::info!("capturing the primary monitor at {w}x{h}");
+        tracing::info!("capturing {:?} at {w}x{h}", settings.target);
 
         // Video and audio share this clock origin so the tracks stay in sync.
         let origin = Instant::now();
