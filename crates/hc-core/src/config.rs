@@ -78,6 +78,15 @@ pub struct Audio {
     pub bitrate_kbps: u32,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Games {
+    /// Tag clips with the fullscreen program that was in front.
+    pub detect: bool,
+    /// Extra program names (e.g. `tool.exe`) that are never treated as games.
+    pub ignore: Vec<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum Channel {
@@ -108,6 +117,7 @@ pub struct Config {
     pub replay: Replay,
     pub video: Video,
     pub audio: Audio,
+    pub games: Games,
     pub storage: Storage,
     pub updates: Updates,
     pub hotkeys: Hotkeys,
@@ -137,6 +147,14 @@ impl Default for Video {
         Self {
             fps: 30,
             bitrate_kbps: 8000,
+        }
+    }
+}
+impl Default for Games {
+    fn default() -> Self {
+        Self {
+            detect: true,
+            ignore: Vec::new(),
         }
     }
 }

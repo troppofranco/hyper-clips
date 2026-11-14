@@ -6,6 +6,7 @@
 pub mod config;
 pub mod consts;
 pub mod error;
+pub mod games;
 pub mod hotkey;
 pub mod i18n;
 pub mod ipc;

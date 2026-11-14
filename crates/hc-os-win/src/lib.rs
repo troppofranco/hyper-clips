@@ -5,6 +5,7 @@
 
 pub mod clock;
 pub mod dialog;
+pub mod foreground;
 pub mod instance;
 pub mod locale;
 pub mod memory;

@@ -11,7 +11,7 @@ use hc_core::paths::AppPaths;
 use hc_core::platform::MemoryProbe;
 use hc_library::{Library, NewClip};
 use hc_os_win::tray::{self, TrayEvent, TrayLabels};
-use hc_os_win::{clock, instance, locale, memory::WinMemoryProbe, pipe, sound};
+use hc_os_win::{clock, foreground, instance, locale, memory::WinMemoryProbe, pipe, sound};
 
 use crate::pipeline::{Pipeline, PipelineSettings};
 use crate::update::UpdateCtx;
@@ -19,7 +19,7 @@ use std::path::PathBuf;
 use std::process::{Child, Command};
 use std::sync::atomic::{AtomicIsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 /// Window handle of the tray window, used by the IPC `Shutdown` request.
 static TRAY_WINDOW: AtomicIsize = AtomicIsize::new(0);
@@ -53,12 +53,57 @@ impl UiLauncher {
     }
 }
 
+/// Remembers the last fullscreen program seen in the foreground.
+struct GameDetector {
+    last: Mutex<Option<(String, Instant)>>,
+}
+
+impl GameDetector {
+    /// How long a game stays "current" after it leaves the foreground (alt-tab, menus).
+    const GRACE: Duration = Duration::from_secs(30);
+
+    fn start(ignore: Vec<String>) -> Arc<Self> {
+        let detector = Arc::new(Self {
+            last: Mutex::new(None),
+        });
+        let worker = Arc::clone(&detector);
+        let spawned = std::thread::Builder::new()
+            .name("hc-games".into())
+            .spawn(move || loop {
+                if let Some(app) = foreground::foreground_app() {
+                    if app.fullscreen && !hc_core::games::is_ignored(&app.exe_name, &ignore) {
+                        if let Ok(mut last) = worker.last.lock() {
+                            *last =
+                                Some((hc_core::games::display_name(&app.exe_name), Instant::now()));
+                        }
+                    }
+                }
+                std::thread::sleep(Duration::from_secs(2));
+            });
+        if let Err(e) = spawned {
+            tracing::warn!("game detection unavailable: {e}");
+        }
+        detector
+    }
+
+    fn current(&self) -> String {
+        self.last
+            .lock()
+            .ok()
+            .and_then(|l| l.clone())
+            .filter(|(_, seen)| seen.elapsed() < Self::GRACE)
+            .map(|(name, _)| name)
+            .unwrap_or_default()
+    }
+}
+
 /// Saves clips from the running pipeline into the clips folder.
 struct ClipSaver {
     pipeline: Option<Arc<Pipeline>>,
     dir: PathBuf,
     secs: u32,
     library: Option<Mutex<Library>>,
+    games: Option<Arc<GameDetector>>,
 }
 
 impl ClipSaver {
@@ -89,7 +134,7 @@ impl ClipSaver {
             created_at: now,
             duration_ms,
             size_bytes: size,
-            game: String::new(),
+            game: self.games.as_ref().map(|g| g.current()).unwrap_or_default(),
         };
         match lib.lock() {
             Ok(l) => {
@@ -228,6 +273,10 @@ pub fn run() -> Result<()> {
         dir: clips_folder,
         secs: config.replay.duration_secs,
         library,
+        games: config
+            .games
+            .detect
+            .then(|| GameDetector::start(config.games.ignore.clone())),
     });
 
     let launcher = Arc::new(UiLauncher {
