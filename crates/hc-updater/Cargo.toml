@@ -9,7 +9,6 @@ publish = false
 repository.workspace = true
 
 [dependencies]
-hc-core.workspace = true
 semver.workspace = true
 serde.workspace = true
 serde_json.workspace = true

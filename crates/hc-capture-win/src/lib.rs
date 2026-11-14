@@ -312,8 +312,8 @@ fn open_duplication(device: &ID3D11Device) -> Result<(IDXGIOutputDuplication, u3
         let dup = output1
             .DuplicateOutput(device)
             .map_err(|e| sys("DuplicateOutput", e))?;
-        let mut desc = DXGI_OUTDUPL_DESC::default();
-        dup.GetDesc(&mut desc);
+        let desc: DXGI_OUTDUPL_DESC;
+        desc = dup.GetDesc();
         Ok((dup, desc.ModeDesc.Width, desc.ModeDesc.Height))
     }
 }
