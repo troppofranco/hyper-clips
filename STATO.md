@@ -21,10 +21,14 @@ hc-library (SQLite: tags, favorites, filters, auto-delete rules, folder scan). U
 
 ## Phase 5/6 (partial): updater + installer DONE (see docs/RELEASING.md); auto-update stays disabled until the minisign key is set.
 
+## Also done (CI green, untested on a PC)
+Hardware encoders (async MFT, software fallback), auto-delete at start, Privacy tab, hyperclips-cli
+(trim/merge/export/shrink/share; needs ffmpeg.exe, not bundled), Discord webhook upload.
+
 ## Still TO DO
-- Hardware encoders (NVENC/AMF/QSV, async MFTs), GPU colour conversion, HEVC/AV1, HDR, fullscreen-exclusive edge cases.
+- GPU colour conversion, HEVC/AV1, HDR, fullscreen-exclusive edge cases.
 - Window / region / multi-monitor capture, per-process audio, webcam overlay, in-game overlay, bookmarks.
-- Auto-delete execution (rules exist in hc-library, not scheduled), editor/export, Discord webhook, LAN share, vault, plugins, CLI/API, backup/restore, Privacy Audit panel, metadata stripping.
+- Graphical editor (the CLI covers trim/export), LAN share + QR, encrypted vault, WASM plugins, local API, backup/restore, local highlights.
 - LICENSE (GPL-3.0 text), Cargo.lock, tray icon, pipe DACL, start_with_windows, per-game profiles.
 
 ## Known limitations

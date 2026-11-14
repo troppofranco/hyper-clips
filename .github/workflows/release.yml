@@ -43,7 +43,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Path dist | Out-Null
           Copy-Item target/release/hyperclips.exe, target/release/hyperclips-ui.exe dist/
-          Copy-Item target/release/hc-updater-helper.exe dist/
+          Copy-Item target/release/hc-updater-helper.exe, target/release/hyperclips-cli.exe dist/
 
       - name: Install Inno Setup
         shell: pwsh
