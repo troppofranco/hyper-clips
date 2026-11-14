@@ -113,7 +113,7 @@ impl Pipeline {
     }
 
     /// Writes the last `secs` seconds to `path` as MP4. Muxing runs on the calling thread.
-    pub fn save_clip(&self, path: &Path, secs: u32) -> Result<()> {
+    pub fn save_clip(&self, path: &Path, secs: u32) -> Result<i64> {
         let snapshot = self
             .buffer
             .lock()
@@ -135,7 +135,7 @@ impl Pipeline {
             path.display(),
             snapshot.duration() as f64 / TICKS_PER_SEC as f64
         );
-        Ok(())
+        Ok(snapshot.duration() / (TICKS_PER_SEC / 1000))
     }
 
     pub fn shutdown(&self) {

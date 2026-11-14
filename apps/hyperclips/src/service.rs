@@ -9,6 +9,7 @@ use hc_core::i18n::Translator;
 use hc_core::ipc::{send_request, Request, Response, ServiceStatus};
 use hc_core::paths::AppPaths;
 use hc_core::platform::MemoryProbe;
+use hc_library::{Library, NewClip};
 use hc_os_win::tray::{self, TrayEvent, TrayLabels};
 use hc_os_win::{clock, instance, locale, memory::WinMemoryProbe, pipe, sound};
 
@@ -57,6 +58,7 @@ struct ClipSaver {
     pipeline: Option<Arc<Pipeline>>,
     dir: PathBuf,
     secs: u32,
+    library: Option<Mutex<Library>>,
 }
 
 impl ClipSaver {
@@ -68,7 +70,29 @@ impl ClipSaver {
         let path = self
             .dir
             .join(format!("HyperClips_{}.mp4", clock::local_timestamp()));
-        pipeline.save_clip(&path, self.secs)?;
+        let duration_ms = pipeline.save_clip(&path, self.secs)?;
+        // The clip is already on disk: a library failure is logged, never fatal.
+        if let Some(lib) = &self.library {
+            let size = std::fs::metadata(&path).map_or(0, |m| m.len() as i64);
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_secs() as i64);
+            let entry = NewClip {
+                path: path.to_string_lossy().into_owned(),
+                created_at: now,
+                duration_ms,
+                size_bytes: size,
+                game: String::new(),
+            };
+            match lib.lock() {
+                Ok(l) => {
+                    if let Err(e) = l.add(&entry) {
+                        tracing::warn!("cannot record the clip in the library: {e}");
+                    }
+                }
+                Err(_) => tracing::warn!("library lock poisoned"),
+            }
+        }
         Ok(path)
     }
 }
@@ -139,10 +163,33 @@ pub fn run() -> Result<()> {
     } else {
         None
     };
+    let clips_folder = clips_dir(&config, &paths);
+    let library = match Library::open(&paths.data_dir().join("library.db")) {
+        Ok(lib) => {
+            // Pick up clips that are already in the folder and forget deleted ones.
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_secs() as i64);
+            match lib.scan_folder(&clips_folder, now) {
+                Ok(n) if n > 0 => tracing::info!("library: imported {n} existing clips"),
+                Ok(_) => {}
+                Err(e) => tracing::warn!("library scan failed: {e}"),
+            }
+            if let Err(e) = lib.prune_missing() {
+                tracing::warn!("library prune failed: {e}");
+            }
+            Some(Mutex::new(lib))
+        }
+        Err(e) => {
+            tracing::warn!("library unavailable: {e}");
+            None
+        }
+    };
     let saver = Arc::new(ClipSaver {
         pipeline: pipeline.clone(),
-        dir: clips_dir(&config, &paths),
+        dir: clips_folder,
         secs: config.replay.duration_secs,
+        library,
     });
 
     let launcher = Arc::new(UiLauncher {
