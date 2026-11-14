@@ -71,28 +71,66 @@ impl ClipSaver {
             .dir
             .join(format!("HyperClips_{}.mp4", clock::local_timestamp()));
         let duration_ms = pipeline.save_clip(&path, self.secs)?;
-        // The clip is already on disk: a library failure is logged, never fatal.
-        if let Some(lib) = &self.library {
-            let size = std::fs::metadata(&path).map_or(0, |m| m.len() as i64);
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_or(0, |d| d.as_secs() as i64);
-            let entry = NewClip {
-                path: path.to_string_lossy().into_owned(),
-                created_at: now,
-                duration_ms,
-                size_bytes: size,
-                game: String::new(),
-            };
-            match lib.lock() {
-                Ok(l) => {
-                    if let Err(e) = l.add(&entry) {
-                        tracing::warn!("cannot record the clip in the library: {e}");
-                    }
+        self.record_in_library(&path, duration_ms);
+        Ok(path)
+    }
+}
+
+impl ClipSaver {
+    /// The file is already on disk: a library failure is logged, never fatal.
+    fn record_in_library(&self, path: &std::path::Path, duration_ms: i64) {
+        let Some(lib) = &self.library else { return };
+        let size = std::fs::metadata(path).map_or(0, |m| m.len() as i64);
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs() as i64);
+        let entry = NewClip {
+            path: path.to_string_lossy().into_owned(),
+            created_at: now,
+            duration_ms,
+            size_bytes: size,
+            game: String::new(),
+        };
+        match lib.lock() {
+            Ok(l) => {
+                if let Err(e) = l.add(&entry) {
+                    tracing::warn!("cannot record the clip in the library: {e}");
                 }
-                Err(_) => tracing::warn!("library lock poisoned"),
             }
+            Err(_) => tracing::warn!("library lock poisoned"),
         }
+    }
+
+    /// Starts or stops a full-session recording. `Some(path)` = it just stopped.
+    fn toggle_recording(&self) -> Result<Option<PathBuf>> {
+        let pipeline = self
+            .pipeline
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("capture is not running (see the log)"))?;
+        if pipeline.is_recording() {
+            let stopped = pipeline.stop_recording()?;
+            return Ok(stopped.map(|(path, ms)| {
+                self.record_in_library(&path, ms);
+                path
+            }));
+        }
+        let path = self
+            .dir
+            .join(format!("HyperClips_{}_rec.mp4", clock::local_timestamp()));
+        pipeline.start_recording(path)?;
+        Ok(None)
+    }
+
+    fn screenshot(&self) -> Result<PathBuf> {
+        let pipeline = self
+            .pipeline
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("capture is not running (see the log)"))?;
+        let path = self
+            .dir
+            .join("Screenshots")
+            .join(format!("HyperClips_{}.png", clock::local_timestamp()));
+        pipeline.screenshot(&path)?;
         Ok(path)
     }
 }
@@ -231,8 +269,14 @@ pub fn run() -> Result<()> {
                 message: format!("{e:#}"),
             },
         },
-        Request::ToggleRecording => Response::Error {
-            message: "manual recording is not implemented yet".to_owned(),
+        Request::ToggleRecording => match handler_saver.toggle_recording() {
+            Ok(Some(path)) => Response::Saved {
+                path: path.display().to_string(),
+            },
+            Ok(None) => Response::Ok,
+            Err(e) => Response::Error {
+                message: format!("{e:#}"),
+            },
         },
         Request::Shutdown => {
             tray::request_quit(TRAY_WINDOW.load(Ordering::Relaxed));
@@ -301,11 +345,45 @@ pub fn run() -> Result<()> {
             }
         }
         TrayEvent::ToggleRecording | TrayEvent::Hotkey(HotkeyAction::ToggleRecording) => {
-            tracing::info!("manual recording is not implemented yet");
+            let saver = Arc::clone(&event_saver);
+            let spawned = std::thread::Builder::new()
+                .name("hc-record".into())
+                .spawn(move || match saver.toggle_recording() {
+                    Ok(Some(path)) => {
+                        tracing::info!("recording saved: {}", path.display());
+                        sound::beep_ok();
+                    }
+                    Ok(None) => {
+                        tracing::info!("recording started");
+                        sound::beep_ok();
+                    }
+                    Err(e) => {
+                        tracing::error!("recording toggle failed: {e:#}");
+                        sound::beep_error();
+                    }
+                });
+            if let Err(e) = spawned {
+                tracing::error!("cannot start the recording thread: {e}");
+            }
         }
         TrayEvent::CheckUpdates => event_updater.spawn_check(true),
         TrayEvent::Hotkey(HotkeyAction::Screenshot) => {
-            tracing::info!("screenshots are not implemented yet");
+            let saver = Arc::clone(&event_saver);
+            let spawned = std::thread::Builder::new()
+                .name("hc-shot".into())
+                .spawn(move || match saver.screenshot() {
+                    Ok(path) => {
+                        tracing::info!("screenshot saved: {}", path.display());
+                        sound::beep_ok();
+                    }
+                    Err(e) => {
+                        tracing::error!("screenshot failed: {e:#}");
+                        sound::beep_error();
+                    }
+                });
+            if let Err(e) = spawned {
+                tracing::error!("cannot start the screenshot thread: {e}");
+            }
         }
     };
 

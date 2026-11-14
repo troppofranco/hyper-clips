@@ -24,6 +24,7 @@ hc-buffer.workspace = true
 hc-capture-win.workspace = true
 hc-audio-win.workspace = true
 hc-library.workspace = true
+png.workspace = true
 hc-encode-win.workspace = true
 
 [lints]

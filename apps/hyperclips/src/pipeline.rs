@@ -6,13 +6,15 @@
 
 use hc_audio_win::timeline::Timeline;
 use hc_audio_win::{AudioCapture, Source};
+use hc_buffer::Packet;
 use hc_buffer::{ReplayBuffer, TICKS_PER_SEC};
 use hc_capture_win::{Frame, ScreenCapture};
 use hc_core::error::{Error, Result};
 use hc_encode_win::aac::AacEncoder;
 use hc_encode_win::encoder::H264Encoder;
-use hc_encode_win::{mux, AudioInfo, VideoInfo};
-use std::path::Path;
+use hc_encode_win::mux::{self, Mp4Writer};
+use hc_encode_win::{annexb, AudioInfo, VideoInfo};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -30,9 +32,75 @@ pub struct PipelineSettings {
 
 type LatestFrame = Arc<Mutex<Option<Arc<Frame>>>>;
 
+/// Full-session recording that taps the same encoded packets as the replay buffer.
+#[derive(Default)]
+struct Recorder {
+    /// Requested file; the writer starts at the next video keyframe.
+    want: Option<PathBuf>,
+    writer: Option<Mp4Writer>,
+    path: Option<PathBuf>,
+    origin: i64,
+    last_video_pts: i64,
+    video_info: Option<VideoInfo>,
+    audio: Vec<(usize, AudioInfo)>,
+}
+
+impl Recorder {
+    fn offer(&mut self, track: usize, p: &Packet) {
+        if self.writer.is_none() {
+            if !(track == 0 && p.keyframe && self.want.is_some() && self.video_info.is_some()) {
+                return;
+            }
+            let (Some(path), Some(info)) = (self.want.take(), self.video_info.clone()) else {
+                return;
+            };
+            let header = if info.sequence_header.is_empty() {
+                annexb::sequence_header(&p.data)
+            } else {
+                info.sequence_header.clone()
+            };
+            match Mp4Writer::create(&path, &info, &header, &self.audio) {
+                Ok(w) => {
+                    self.writer = Some(w);
+                    self.origin = p.pts;
+                    self.path = Some(path);
+                }
+                Err(e) => {
+                    tracing::error!("cannot start the recording: {e}");
+                    return;
+                }
+            }
+        }
+        if track != 0 && p.pts < self.origin {
+            return;
+        }
+        if track == 0 {
+            self.last_video_pts = p.pts + p.duration;
+        }
+        if let Some(w) = self.writer.as_mut() {
+            if let Err(e) = w.write(track, p, p.pts - self.origin) {
+                tracing::error!("recording write failed, stopping: {e}");
+                self.writer = None;
+            }
+        }
+    }
+}
+
+/// Sends a packet to the recorder (if active) and to the replay buffer.
+fn emit(buffer: &Mutex<ReplayBuffer>, rec: &Mutex<Recorder>, track: usize, packet: Packet) {
+    if let Ok(mut r) = rec.lock() {
+        r.offer(track, &packet);
+    }
+    if let Ok(mut b) = buffer.lock() {
+        b.push(track, packet);
+    }
+}
+
 pub struct Pipeline {
     buffer: Arc<Mutex<ReplayBuffer>>,
     info: Arc<Mutex<Option<VideoInfo>>>,
+    rec: Arc<Mutex<Recorder>>,
+    latest: LatestFrame,
     stop: Arc<AtomicBool>,
     capture: Mutex<Option<ScreenCapture>>,
     /// One per audio track (track index = position + 1).
@@ -62,6 +130,7 @@ impl Pipeline {
         let info = Arc::new(Mutex::new(None));
         let stop = Arc::new(AtomicBool::new(false));
         let latest: LatestFrame = Arc::new(Mutex::new(None));
+        let rec = Arc::new(Mutex::new(Recorder::default()));
 
         let slot = Arc::clone(&latest);
         let capture = ScreenCapture::start_primary_monitor(move |frame| {
@@ -80,14 +149,25 @@ impl Pipeline {
         let mut audio_infos = Vec::new();
         for source in sources {
             let track = audio.len() + 1;
-            match start_audio_track(source, track, settings.audio_bitrate_bps, origin, &buffer) {
+            match start_audio_track(
+                source,
+                track,
+                settings.audio_bitrate_bps,
+                origin,
+                &buffer,
+                &rec,
+            ) {
                 Ok(capture) => {
                     audio.push(capture);
-                    audio_infos.push(AudioInfo {
+                    let format = AudioInfo {
                         sample_rate: hc_audio_win::timeline::SAMPLE_RATE,
                         channels: hc_audio_win::timeline::CHANNELS,
                         bitrate_bps: settings.audio_bitrate_bps,
-                    });
+                    };
+                    audio_infos.push(format);
+                    if let Ok(mut r) = rec.lock() {
+                        r.audio.push((track, format));
+                    }
                 }
                 Err(e) => tracing::warn!("audio source {source:?} unavailable: {e}"),
             }
@@ -95,15 +175,18 @@ impl Pipeline {
 
         let worker = {
             let (buffer, info, stop) = (Arc::clone(&buffer), Arc::clone(&info), Arc::clone(&stop));
+            let (rec, latest) = (Arc::clone(&rec), Arc::clone(&latest));
             std::thread::Builder::new()
                 .name("hc-encode".into())
-                .spawn(move || encode_loop(settings, origin, &latest, &buffer, &info, &stop))
+                .spawn(move || encode_loop(settings, origin, &latest, &buffer, &info, &rec, &stop))
                 .map_err(|e| Error::System(format!("cannot start the encoder thread: {e}")))?
         };
 
         Ok(Self {
             buffer,
             info,
+            rec,
+            latest,
             stop,
             capture: Mutex::new(Some(capture)),
             audio_infos,
@@ -138,7 +221,71 @@ impl Pipeline {
         Ok(snapshot.duration() / (TICKS_PER_SEC / 1000))
     }
 
+    pub fn is_recording(&self) -> bool {
+        self.rec
+            .lock()
+            .is_ok_and(|r| r.want.is_some() || r.writer.is_some())
+    }
+
+    /// Starts recording everything from the next video keyframe into `path`.
+    pub fn start_recording(&self, path: PathBuf) -> Result<()> {
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        let mut r = self
+            .rec
+            .lock()
+            .map_err(|_| Error::System("recorder lock poisoned".into()))?;
+        if r.want.is_some() || r.writer.is_some() {
+            return Err(Error::Invalid("already recording".into()));
+        }
+        r.want = Some(path);
+        Ok(())
+    }
+
+    /// Stops the recording; returns the file and its length in ms (None if it never started).
+    pub fn stop_recording(&self) -> Result<Option<(PathBuf, i64)>> {
+        let mut r = self
+            .rec
+            .lock()
+            .map_err(|_| Error::System("recorder lock poisoned".into()))?;
+        r.want = None;
+        let (Some(writer), Some(path)) = (r.writer.take(), r.path.take()) else {
+            return Ok(None);
+        };
+        let ms = (r.last_video_pts - r.origin) / (TICKS_PER_SEC / 1000);
+        writer.finish()?;
+        Ok(Some((path, ms.max(0))))
+    }
+
+    /// Writes the newest captured frame to `path` as PNG.
+    pub fn screenshot(&self, path: &Path) -> Result<()> {
+        let frame = self
+            .latest
+            .lock()
+            .ok()
+            .and_then(|g| g.clone())
+            .ok_or_else(|| Error::Invalid("no frame captured yet".into()))?;
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        let mut rgba = Vec::with_capacity(frame.bgra.len());
+        for px in frame.bgra.chunks_exact(4) {
+            rgba.extend_from_slice(&[px[2], px[1], px[0], 255]);
+        }
+        let file = std::io::BufWriter::new(std::fs::File::create(path)?);
+        let mut encoder = png::Encoder::new(file, frame.width, frame.height);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder
+            .write_header()
+            .and_then(|mut w| w.write_image_data(&rgba))
+            .map_err(|e| Error::System(format!("cannot write the PNG: {e}")))?;
+        Ok(())
+    }
+
     pub fn shutdown(&self) {
+        let _ = self.stop_recording();
         self.stop.store(true, Ordering::Relaxed);
         if let Ok(mut c) = self.capture.lock() {
             *c = None; // dropping stops the capture
@@ -161,9 +308,11 @@ fn start_audio_track(
     bitrate_bps: u32,
     origin: Instant,
     buffer: &Arc<Mutex<ReplayBuffer>>,
+    rec: &Arc<Mutex<Recorder>>,
 ) -> Result<AudioCapture> {
     const AAC_FRAME_TICKS: i64 = 1024 * TICKS_PER_SEC / 48_000;
     let buffer = Arc::clone(buffer);
+    let rec = Arc::clone(rec);
     let mut encoder: Option<AacEncoder> = None;
     let mut timeline = Timeline::new();
     let mut packets = Vec::new();
@@ -208,14 +357,12 @@ fn start_audio_track(
         if packets.is_empty() {
             return;
         }
-        if let Ok(mut b) = buffer.lock() {
-            for mut p in packets.drain(..) {
-                // Timestamps come from the frame count, not from the MFT.
-                p.pts = emitted * AAC_FRAME_TICKS;
-                p.duration = AAC_FRAME_TICKS;
-                emitted += 1;
-                b.push(track, p);
-            }
+        for mut p in packets.drain(..) {
+            // Timestamps come from the frame count, not from the MFT.
+            p.pts = emitted * AAC_FRAME_TICKS;
+            p.duration = AAC_FRAME_TICKS;
+            emitted += 1;
+            emit(&buffer, &rec, track, p);
         }
     })
 }
@@ -226,6 +373,7 @@ fn encode_loop(
     latest: &LatestFrame,
     buffer: &Mutex<ReplayBuffer>,
     info: &Mutex<Option<VideoInfo>>,
+    rec: &Mutex<Recorder>,
     stop: &AtomicBool,
 ) {
     let fps = settings.fps.max(1);
@@ -277,15 +425,17 @@ fn encode_loop(
         packets.clear();
         match enc.encode_bgra(&frame.bgra, frame.width, frame.height, pts, &mut packets) {
             Ok(()) => {
-                if let Ok(mut b) = buffer.lock() {
-                    for p in packets.drain(..) {
-                        b.push(0, p);
-                    }
-                }
+                // Publish the stream info first so a recording can start on this very packet.
                 if let Ok(mut i) = info.lock() {
                     if i.as_ref() != Some(enc.info()) {
                         *i = Some(enc.info().clone());
+                        if let Ok(mut r) = rec.lock() {
+                            r.video_info = Some(enc.info().clone());
+                        }
                     }
+                }
+                for p in packets.drain(..) {
+                    emit(buffer, rec, 0, p);
                 }
             }
             Err(e) => {
