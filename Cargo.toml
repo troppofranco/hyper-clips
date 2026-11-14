@@ -52,6 +52,8 @@ eframe = { version = "0.31", default-features = false, features = ["default_font
 
 [workspace.lints.clippy]
 unwrap_used = "deny"
+# Stylistic only; the iterator form is clearer in the pixel loops.
+chunks_exact_to_as_chunks = "allow"
 
 [profile.release]
 lto = "fat"
