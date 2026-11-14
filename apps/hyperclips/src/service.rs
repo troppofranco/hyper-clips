@@ -9,7 +9,7 @@ use hc_core::i18n::Translator;
 use hc_core::ipc::{send_request, Request, Response, ServiceStatus};
 use hc_core::paths::AppPaths;
 use hc_core::platform::MemoryProbe;
-use hc_library::{Library, NewClip};
+use hc_library::{AutoDelete, Library, NewClip};
 use hc_os_win::tray::{self, TrayEvent, TrayLabels};
 use hc_os_win::{clock, foreground, instance, locale, memory::WinMemoryProbe, pipe, sound};
 
@@ -261,6 +261,27 @@ pub fn run() -> Result<()> {
             }
             if let Err(e) = lib.prune_missing() {
                 tracing::warn!("library prune failed: {e}");
+            }
+            let rules = AutoDelete {
+                max_age_days: config.storage.auto_delete_days,
+                max_total_bytes: u64::from(config.storage.max_total_gb) * 1024 * 1024 * 1024,
+                keep_favorites: config.storage.keep_favorites,
+            };
+            if rules.max_age_days > 0 || rules.max_total_bytes > 0 {
+                match lib.auto_delete_candidates(rules, now) {
+                    Ok(list) => {
+                        for (id, path) in list {
+                            // Forget the row only when the file is really gone.
+                            let gone = std::fs::remove_file(&path).is_ok()
+                                || !std::path::Path::new(&path).exists();
+                            if gone {
+                                let _ = lib.remove(id);
+                                tracing::info!("auto-delete: removed {path}");
+                            }
+                        }
+                    }
+                    Err(e) => tracing::warn!("auto-delete failed: {e}"),
+                }
             }
             Some(Mutex::new(lib))
         }

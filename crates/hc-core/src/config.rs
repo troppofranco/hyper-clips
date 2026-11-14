@@ -105,11 +105,28 @@ pub struct Updates {
     pub skip_version: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Storage {
     /// Folder for saved clips. Empty = default (Videos\HyperClips, or `clips` when portable).
     pub clips_dir: String,
+    /// Delete clips older than this many days (0 = never).
+    pub auto_delete_days: u32,
+    /// Delete the oldest clips while the library is bigger than this many GB (0 = no limit).
+    pub max_total_gb: u32,
+    /// Favorites are never auto-deleted.
+    pub keep_favorites: bool,
+}
+
+impl Default for Storage {
+    fn default() -> Self {
+        Self {
+            clips_dir: String::new(),
+            auto_delete_days: 0,
+            max_total_gb: 0,
+            keep_favorites: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]

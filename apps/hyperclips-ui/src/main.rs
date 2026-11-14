@@ -4,7 +4,7 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 use eframe::egui;
-use hc_core::config::{Config, Theme};
+use hc_core::config::{Config, Theme, UpdateCheck};
 use hc_core::consts::{current_user, pipe_path};
 use hc_core::i18n::Translator;
 use hc_core::ipc::{send_request, Request, Response, ServiceStatus};
@@ -25,6 +25,7 @@ enum Tab {
     Home,
     Library,
     Settings,
+    Privacy,
 }
 
 #[derive(Default)]
@@ -141,12 +142,14 @@ impl eframe::App for App {
                 ui.selectable_value(&mut self.tab, Tab::Home, self.tr.t("ui_tab_home"));
                 ui.selectable_value(&mut self.tab, Tab::Library, self.tr.t("ui_tab_library"));
                 ui.selectable_value(&mut self.tab, Tab::Settings, self.tr.t("ui_tab_settings"));
+                ui.selectable_value(&mut self.tab, Tab::Privacy, self.tr.t("ui_tab_privacy"));
             });
         });
         egui::CentralPanel::default().show(ctx, |ui| match self.tab {
             Tab::Home => self.home_ui(ui),
             Tab::Library => self.library_ui(ui),
             Tab::Settings => self.settings_ui(ui),
+            Tab::Privacy => self.privacy_ui(ui),
         });
     }
 }
@@ -312,6 +315,39 @@ impl App {
         }
         if let Some(path) = open {
             open_file(&path);
+        }
+    }
+
+    fn privacy_ui(&self, ui: &mut egui::Ui) {
+        ui.heading(self.tr.t("priv_title"));
+        ui.add_space(6.0);
+        ui.label(self.tr.t("priv_telemetry"));
+        ui.label(self.tr.t("priv_network"));
+        let update_key = if self.config.privacy.update_check == UpdateCheck::OnStart {
+            "priv_update_on"
+        } else {
+            "priv_update_off"
+        };
+        ui.label(self.tr.t(update_key));
+        let mic_key = if self.config.audio.microphone {
+            "priv_mic_on"
+        } else {
+            "priv_mic_off"
+        };
+        ui.label(self.tr.t(mic_key));
+        ui.add_space(6.0);
+        let data = self
+            .library_path
+            .parent()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default();
+        ui.label(format!("{}: {data}", self.tr.t("priv_data")));
+        if !self.config.storage.clips_dir.is_empty() {
+            ui.label(format!(
+                "{}: {}",
+                self.tr.t("priv_clips"),
+                self.config.storage.clips_dir
+            ));
         }
     }
 
