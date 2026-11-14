@@ -22,6 +22,7 @@ tracing.workspace = true
 hc-os-win.workspace = true
 hc-buffer.workspace = true
 hc-capture-win.workspace = true
+hc-audio-win.workspace = true
 hc-encode-win.workspace = true
 
 [lints]

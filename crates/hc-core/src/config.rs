@@ -68,6 +68,16 @@ pub struct Video {
     pub bitrate_kbps: u32,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Audio {
+    /// Record everything the PC plays (WASAPI loopback) as its own track.
+    pub system: bool,
+    /// Record the default microphone as its own track (off by default: privacy).
+    pub microphone: bool,
+    pub bitrate_kbps: u32,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum Channel {
@@ -97,6 +107,7 @@ pub struct Config {
     pub general: General,
     pub replay: Replay,
     pub video: Video,
+    pub audio: Audio,
     pub storage: Storage,
     pub updates: Updates,
     pub hotkeys: Hotkeys,
@@ -126,6 +137,15 @@ impl Default for Video {
         Self {
             fps: 30,
             bitrate_kbps: 8000,
+        }
+    }
+}
+impl Default for Audio {
+    fn default() -> Self {
+        Self {
+            system: true,
+            microphone: false,
+            bitrate_kbps: 128,
         }
     }
 }
@@ -188,6 +208,11 @@ impl Config {
             return Err(Error::Invalid(format!(
                 "video.fps must be {MIN_FPS}..={MAX_FPS}"
             )));
+        }
+        if ![96, 128, 160, 192].contains(&self.audio.bitrate_kbps) {
+            return Err(Error::Invalid(
+                "audio.bitrate_kbps must be 96, 128, 160 or 192".into(),
+            ));
         }
         if !(MIN_BITRATE_KBPS..=MAX_BITRATE_KBPS).contains(&self.video.bitrate_kbps) {
             return Err(Error::Invalid(format!(

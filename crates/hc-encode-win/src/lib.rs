@@ -5,6 +5,8 @@ pub mod annexb;
 pub mod convert;
 
 #[cfg(windows)]
+pub mod aac;
+#[cfg(windows)]
 pub mod encoder;
 #[cfg(windows)]
 pub mod mf;
@@ -20,4 +22,12 @@ pub struct VideoInfo {
     pub bitrate_bps: u32,
     /// Annex-B SPS+PPS; may be empty, then it is taken from the first keyframe.
     pub sequence_header: Vec<u8>,
+}
+
+/// Parameters of an encoded AAC track.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AudioInfo {
+    pub sample_rate: u32,
+    pub channels: u32,
+    pub bitrate_bps: u32,
 }

@@ -1,0 +1,23 @@
+[package]
+name = "hc-audio-win"
+description = "WASAPI audio capture (system loopback, microphone) + a portable gap-filling timeline"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+repository.workspace = true
+
+[dependencies]
+hc-core.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+tracing.workspace = true
+windows = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_Media_Audio",
+    "Win32_System_Com",
+] }
+
+[lints]
+workspace = true

@@ -126,6 +126,9 @@ pub fn run() -> Result<()> {
             fps: config.video.fps,
             bitrate_bps: config.video.bitrate_kbps.saturating_mul(1000),
             replay_secs: config.replay.duration_secs,
+            audio_system: config.audio.system,
+            audio_mic: config.audio.microphone,
+            audio_bitrate_bps: config.audio.bitrate_kbps.saturating_mul(1000),
         }) {
             Ok(p) => Some(Arc::new(p)),
             Err(e) => {
