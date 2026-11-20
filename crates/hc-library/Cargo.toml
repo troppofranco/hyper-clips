@@ -1,0 +1,30 @@
+[package]
+name = "hc-library"
+description = "Hyper Clips local library: SQLite index, tags, thumbnails, storage quota"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+hc-capture.workspace = true
+hc-core.workspace = true
+hc-encode.workspace = true
+rusqlite.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dependencies.windows]
+workspace = true
+features = [
+    "Win32_Foundation",
+    "Win32_System_DataExchange",
+    "Win32_System_Memory",
+    "Win32_System_Ole",
+    "Win32_UI_Shell",
+]
+
+[lints]
+workspace = true

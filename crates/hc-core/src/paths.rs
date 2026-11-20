@@ -98,6 +98,14 @@ impl AppPaths {
         }
     }
 
+    pub fn library_db(&self) -> PathBuf {
+        self.data_dir.join("library.db")
+    }
+
+    pub fn thumbs_dir(&self) -> PathBuf {
+        self.cache_dir.join("thumbs")
+    }
+
     pub fn config_file(&self) -> PathBuf {
         self.config_dir.join("config.toml")
     }

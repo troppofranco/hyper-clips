@@ -52,6 +52,7 @@ struct App {
     taskbar_created: u32,
     capture: CaptureCtl,
     overlay: Option<crate::overlay::Overlay>,
+    indexer: crate::indexer::Indexer,
 }
 
 thread_local! {
@@ -113,6 +114,7 @@ pub fn run(background: bool) -> ExitCode {
         ipc_rx,
         started: t0,
         capture: CaptureCtl::new(hwnd, &paths),
+        indexer: crate::indexer::Indexer::start(&paths),
         overlay: crate::overlay::Overlay::new()
             .inspect_err(|e| tracing::warn!(error = %e, "in-game overlay unavailable"))
             .ok(),
@@ -298,6 +300,17 @@ impl App {
 
     fn on_capture_events(&mut self) {
         while let Ok(ev) = self.capture.events.try_recv() {
+            // Every saved file goes into the library (in the background).
+            if let Event::ClipSaved { path, .. }
+            | Event::RecordingStopped { path, .. }
+            | Event::ScreenshotSaved { path } = &ev
+            {
+                self.indexer.submit(crate::indexer::Job {
+                    path: path.clone(),
+                    game: self.capture.game.as_ref().map(|g| g.name.clone()),
+                    limit_bytes: self.config.library.limit_bytes(),
+                });
+            }
             match ev {
                 Event::Started {
                     encoder,

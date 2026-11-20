@@ -96,20 +96,30 @@ pub struct PipeServer {
     first: AtomicBool,
     stopping: AtomicBool,
     security: SecurityDescriptor,
+    /// An instance always waiting for the next client, so back-to-back
+    /// connections never find the name missing.
+    pending: std::sync::Mutex<Option<PipeStream>>,
 }
 
 impl PipeServer {
     pub fn new(name: &str) -> Result<Self, IpcError> {
-        Ok(Self {
+        let server = Self {
             name: HSTRING::from(name),
             first: AtomicBool::new(true),
             stopping: AtomicBool::new(false),
             security: SecurityDescriptor::current_user_only()?,
-        })
+            pending: std::sync::Mutex::new(None),
+        };
+        // Create the first instance now: claims the name (anti-squatting)
+        // and lets clients connect before the accept loop runs.
+        let first = server.create_instance()?;
+        if let Ok(mut p) = server.pending.lock() {
+            *p = Some(first);
+        }
+        Ok(server)
     }
 
-    /// Block until a client connects. Returns `Ok(None)` after [`Self::stop`].
-    pub fn accept(&self) -> Result<Option<PipeStream>, IpcError> {
+    fn create_instance(&self) -> Result<PipeStream, IpcError> {
         let mut open_mode = PIPE_ACCESS_DUPLEX;
         if self.first.swap(false, Ordering::SeqCst) {
             // Fail if another process already owns this pipe name (squatting).
@@ -136,12 +146,21 @@ impl PipeServer {
         if handle.is_invalid() {
             return Err(IpcError::Os(windows::core::Error::from_thread()));
         }
-        let stream = PipeStream {
+        Ok(PipeStream {
             handle,
             server: true,
+        })
+    }
+
+    /// Block until a client connects. Returns `Ok(None)` after [`Self::stop`].
+    pub fn accept(&self) -> Result<Option<PipeStream>, IpcError> {
+        let pending = self.pending.lock().ok().and_then(|mut p| p.take());
+        let stream = match pending {
+            Some(s) => s,
+            None => self.create_instance()?,
         };
         // SAFETY: valid pipe handle, synchronous mode.
-        match unsafe { ConnectNamedPipe(handle, None) } {
+        match unsafe { ConnectNamedPipe(stream.handle, None) } {
             Ok(()) => {}
             Err(e) if e.code() == ERROR_PIPE_CONNECTED.to_hresult() => {}
             Err(e) => return Err(IpcError::Os(e)),
@@ -149,9 +168,17 @@ impl PipeServer {
         if self.stopping.load(Ordering::SeqCst) {
             return Ok(None);
         }
+        // Prepare the next listener before serving this client.
+        match self.create_instance() {
+            Ok(next) => {
+                if let Ok(mut p) = self.pending.lock() {
+                    *p = Some(next);
+                }
+            }
+            Err(e) => tracing::warn!(error = %e, "cannot pre-create next pipe instance"),
+        }
         Ok(Some(stream))
     }
-
     /// Unblock a pending [`Self::accept`] so the accept loop can exit.
     pub fn stop(&self) {
         self.stopping.store(true, Ordering::SeqCst);

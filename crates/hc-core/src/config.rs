@@ -29,6 +29,7 @@ pub struct Config {
     pub capture: Capture,
     pub audio: Audio,
     pub webcam: Webcam,
+    pub library: LibrarySettings,
     pub hotkeys: Hotkeys,
     pub notifications: Notifications,
     pub privacy: Privacy,
@@ -189,6 +190,25 @@ pub struct Region {
     pub y: i32,
     pub width: u32,
     pub height: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct LibrarySettings {
+    /// Storage limit in GB for the library; 0 = unlimited.
+    pub max_storage_gb: f64,
+    /// When over the limit, move the oldest non-favourite items to the
+    /// Recycle Bin automatically.
+    pub auto_delete: bool,
+    /// Additional folders scanned into the library.
+    pub extra_folders: Vec<PathBuf>,
+}
+
+impl LibrarySettings {
+    pub fn limit_bytes(&self) -> Option<u64> {
+        (self.auto_delete && self.max_storage_gb > 0.0)
+            .then_some((self.max_storage_gb * 1024.0 * 1024.0 * 1024.0) as u64)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -439,6 +459,9 @@ impl Config {
         self.audio.microphone_volume = self.audio.microphone_volume.min(200);
         self.audio.bitrate_kbps = self.audio.bitrate_kbps.clamp(96, 192);
         self.audio.noise_gate_db = self.audio.noise_gate_db.clamp(-90, 0);
+        if !self.library.max_storage_gb.is_finite() || self.library.max_storage_gb < 0.0 {
+            self.library.max_storage_gb = 0.0;
+        }
         self.webcam.size_percent = self.webcam.size_percent.clamp(5, 60);
         self.capture.sdr_white_nits = self.capture.sdr_white_nits.clamp(80, 1000);
         self.updates.interval_hours = self.updates.interval_hours.clamp(1, 24 * 30);

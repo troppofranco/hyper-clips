@@ -112,6 +112,86 @@ pub fn save(
     save_pixels(desc.Width, desc.Height, pitch, &pixels, path, format)
 }
 
+/// Decode any image WIC understands (PNG, JPEG, BMP, WebP with the codec
+/// installed, …) into top-down BGRA: (width, height, pixels).
+pub fn load_image(path: &Path) -> Result<(u32, u32, Vec<u8>), CaptureError> {
+    use windows::Win32::Foundation::GENERIC_READ;
+    use windows::Win32::Graphics::Imaging::{
+        GUID_WICPixelFormat32bppBGRA, WICBitmapDitherTypeNone, WICBitmapPaletteTypeCustom,
+        WICDecodeMetadataCacheOnDemand,
+    };
+    // SAFETY: WIC objects are ref-counted; the output buffer is sized from the frame.
+    unsafe {
+        let factory: IWICImagingFactory =
+            CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)?;
+        let decoder = factory.CreateDecoderFromFilename(
+            &HSTRING::from(path.as_os_str()),
+            None,
+            GENERIC_READ,
+            WICDecodeMetadataCacheOnDemand,
+        )?;
+        let frame = decoder.GetFrame(0)?;
+        let conv = factory.CreateFormatConverter()?;
+        conv.Initialize(
+            &frame,
+            &GUID_WICPixelFormat32bppBGRA,
+            WICBitmapDitherTypeNone,
+            None,
+            0.0,
+            WICBitmapPaletteTypeCustom,
+        )?;
+        let (mut w, mut h) = (0u32, 0u32);
+        conv.GetSize(&mut w, &mut h)?;
+        let mut px = vec![0u8; (w * h * 4) as usize];
+        conv.CopyPixels(std::ptr::null(), w * 4, &mut px)?;
+        Ok((w, h, px))
+    }
+}
+
+/// Area-average downscale of BGRA pixels to fit within `max_w` × `max_h`.
+pub fn downscale(
+    w: u32,
+    h: u32,
+    stride: u32,
+    px: &[u8],
+    max_w: u32,
+    max_h: u32,
+) -> (u32, u32, Vec<u8>) {
+    let scale = (f64::from(max_w) / f64::from(w.max(1)))
+        .min(f64::from(max_h) / f64::from(h.max(1)))
+        .min(1.0);
+    let (nw, nh) = (
+        ((f64::from(w) * scale).round() as u32).max(1),
+        ((f64::from(h) * scale).round() as u32).max(1),
+    );
+    let mut out = vec![0u8; (nw * nh * 4) as usize];
+    for y in 0..nh {
+        let (y0, y1) = (y * h / nh, ((y + 1) * h / nh).max(y * h / nh + 1).min(h));
+        for x in 0..nw {
+            let (x0, x1) = (x * w / nw, ((x + 1) * w / nw).max(x * w / nw + 1).min(w));
+            let mut acc = [0u32; 4];
+            let mut n = 0u32;
+            for sy in y0..y1 {
+                let row = (sy * stride) as usize;
+                for sx in x0..x1 {
+                    let i = row + (sx * 4) as usize;
+                    if let Some(p) = px.get(i..i + 4) {
+                        for c in 0..4 {
+                            acc[c] += u32::from(p[c]);
+                        }
+                        n += 1;
+                    }
+                }
+            }
+            let o = ((y * nw + x) * 4) as usize;
+            for c in 0..4 {
+                out[o + c] = (acc[c] / n.max(1)) as u8;
+            }
+        }
+    }
+    (nw, nh, out)
+}
+
 fn save_webp(
     width: u32,
     height: u32,
