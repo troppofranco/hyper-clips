@@ -2,7 +2,7 @@
 
 Formato: [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) · Versioni: [SemVer](https://semver.org/lang/it/).
 
-## [Unreleased]
+## [0.2.0]
 
 ### Interfaccia rinnovata
 - Nuovo layout dello studio: barra laterale con icone (Libreria, Momenti salienti, Editor, Vault, Impostazioni, Privacy), spazio su disco e stato del servizio; barra superiore con stato della cattura (replay attivo / registrazione / spento) e menu di azioni rapide, ricerca e "Condividi l'ultima".
