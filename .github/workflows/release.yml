@@ -56,21 +56,16 @@ jobs:
           & $iscc installer\hyperclips.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Checksums and signature
+      - name: Checksums
         shell: pwsh
-        env:
-          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
-          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
         run: |
-          if (-not $env:MINISIGN_SECRET_KEY) { Write-Error "MINISIGN_SECRET_KEY secret is not configured (see docs/RELEASING.md)"; exit 1 }
           Push-Location dist
           $lines = Get-ChildItem -File | Where-Object { $_.Name -match '\.(exe|zip)$' } | Sort-Object Name | ForEach-Object {
             "$((Get-FileHash $_.Name -Algorithm SHA256).Hash.ToLower())  $($_.Name)"
           }
           [IO.File]::WriteAllText("$PWD\checksums.txt", ($lines -join "`n") + "`n")
-          & ..\target\release\hc-sign.exe sign checksums.txt $env:HC_VERSION
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Pop-Location
+
 
       - name: Release notes
         shell: pwsh
@@ -78,7 +73,7 @@ jobs:
           $log = Get-Content CHANGELOG.md -Raw
           $m = [regex]::Match($log, "(?ms)^## \[$([regex]::Escape($env:HC_VERSION))\].*?(?=^## \[|\z)")
           $notes = if ($m.Success) { $m.Value } else { "See CHANGELOG.md" }
-          $notes += "`n`nVerify: ``minisign -Vm checksums.txt -P $((Get-Content keys\hyperclips.pub.b64 -Raw).Trim())``"
+          $notes += "`n`nSHA-256 of every file: see ``checksums.txt``."
           [IO.File]::WriteAllText("$PWD\notes.md", $notes)
 
       - name: Publish

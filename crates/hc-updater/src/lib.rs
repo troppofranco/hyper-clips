@@ -4,10 +4,10 @@
 //! Requests carry a generic User-Agent and no identifiers; every request URL
 //! is appended to a local `network.log` shown by the Privacy Audit.
 //!
-//! Integrity: `checksums.txt` must carry a valid minisign signature from the
-//! public key compiled into the app, and its trusted comment must name the
-//! release version (prevents replaying an older signed release). The
-//! downloaded package must then match its SHA-256 line. Any mismatch aborts.
+//! Integrity: the downloaded package must match its SHA-256 line in the
+//! release's `checksums.txt` (both fetched over HTTPS from GitHub). This
+//! catches corrupted or truncated downloads; authenticity relies on the
+//! GitHub account that publishes the releases. Any mismatch aborts.
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -22,11 +22,7 @@ pub const OWNER: &str = "troppofranco";
 pub const REPO: &str = "hyper-clips";
 /// Generic on purpose: no version, no machine or user identifiers.
 pub const USER_AGENT: &str = "HyperClips-Updater";
-/// minisign public key (base64 line of `hyperclips.pub`).
-pub const PUBLIC_KEY: &str = include_str!("../../../keys/hyperclips.pub.b64");
-
 pub const CHECKSUMS: &str = "checksums.txt";
-pub const SIGNATURE: &str = "checksums.txt.minisig";
 
 #[derive(Debug, thiserror::Error)]
 pub enum UpdateError {
@@ -34,8 +30,7 @@ pub enum UpdateError {
     Net(String),
     #[error("invalid release data: {0}")]
     Data(String),
-    #[error("signature verification failed: {0}")]
-    Signature(String),
+
     #[error("checksum mismatch for {0}")]
     Checksum(String),
     #[error("file system: {0}")]
@@ -226,35 +221,6 @@ pub fn parse_checksums(text: &str) -> Vec<(String, String)> {
         .collect()
 }
 
-/// Verify `checksums.txt` against its minisign signature with `public_key`
-/// and require the trusted comment to name `version`.
-pub fn verify_signature(
-    public_key_b64: &str,
-    data: &[u8],
-    signature: &str,
-    version: &Version,
-) -> Result<()> {
-    let pk = minisign_verify::PublicKey::from_base64(public_key_b64.trim())
-        .map_err(|e| UpdateError::Signature(format!("bad public key: {e}")))?;
-    let sig = minisign_verify::Signature::decode(signature)
-        .map_err(|e| UpdateError::Signature(e.to_string()))?;
-    pk.verify(data, &sig, false)
-        .map_err(|e| UpdateError::Signature(e.to_string()))?;
-    let comment = sig.trusted_comment();
-    let expected = format!("hyperclips {version}");
-    if !comment
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .windows(2)
-        .any(|w| format!("{} {}", w[0], w[1]) == expected)
-    {
-        return Err(UpdateError::Signature(format!(
-            "trusted comment {comment:?} does not match {expected:?} (possible replay of an old release)"
-        )));
-    }
-    Ok(())
-}
-
 pub fn sha256_file(path: &Path) -> Result<String> {
     let mut f = std::fs::File::open(path)?;
     let mut h = Sha256::new();
@@ -314,14 +280,7 @@ pub fn download_verified(
     let sums = release
         .asset(CHECKSUMS)
         .ok_or_else(|| UpdateError::Data("release has no checksums.txt".into()))?;
-    let sig = release
-        .asset(SIGNATURE)
-        .ok_or_else(|| UpdateError::Data("release has no signature".into()))?;
     let sums_data = get_bytes(&sums.url, 1 << 20)?;
-    let sig_data = get_bytes(&sig.url, 1 << 16)?;
-    let sig_text =
-        String::from_utf8(sig_data).map_err(|e| UpdateError::Signature(e.to_string()))?;
-    verify_signature(PUBLIC_KEY, &sums_data, &sig_text, &release.version)?;
     let name = release.package_name(kind);
     let expected = parse_checksums(&String::from_utf8_lossy(&sums_data))
         .into_iter()
@@ -338,7 +297,7 @@ pub fn download_verified(
         let _ = std::fs::remove_file(&dest);
         return Err(UpdateError::Checksum(name));
     }
-    tracing::info!(file = %name, "update package verified (signature + SHA-256)");
+    tracing::info!(file = %name, "update package verified (SHA-256)");
     Ok(dest)
 }
 
@@ -427,39 +386,5 @@ mod tests {
         let list = parse_checksums(&text);
         assert_eq!(list.len(), 2);
         assert_eq!(list[1].0, "HyperClips-1.0.0-portable.zip");
-    }
-
-    #[test]
-    fn signature_and_replay_protection() {
-        let kp = minisign::KeyPair::generate_unencrypted_keypair().unwrap();
-        let pk_b64 = kp.pk.to_base64();
-        let data = b"abc  HyperClips-Setup-1.2.3.exe\n";
-        let sign = |comment: &str| {
-            minisign::sign(
-                Some(&kp.pk),
-                &kp.sk,
-                std::io::Cursor::new(data),
-                Some(comment),
-                None,
-            )
-            .unwrap()
-            .to_string()
-        };
-        let v = Version::parse("1.2.3").unwrap();
-        verify_signature(&pk_b64, data, &sign("hyperclips 1.2.3"), &v).unwrap();
-        // A valid signature for another version is rejected (replay).
-        assert!(verify_signature(&pk_b64, data, &sign("hyperclips 1.2.2"), &v).is_err());
-        // Tampered data is rejected.
-        assert!(verify_signature(&pk_b64, b"evil", &sign("hyperclips 1.2.3"), &v).is_err());
-        // Another key is rejected.
-        let other = minisign::KeyPair::generate_unencrypted_keypair().unwrap();
-        assert!(
-            verify_signature(&other.pk.to_base64(), data, &sign("hyperclips 1.2.3"), &v).is_err()
-        );
-    }
-
-    #[test]
-    fn embedded_key_is_valid() {
-        assert!(minisign_verify::PublicKey::from_base64(PUBLIC_KEY.trim()).is_ok());
     }
 }

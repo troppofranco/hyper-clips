@@ -38,7 +38,7 @@ Windows (DXGI, Direct3D 11, Media Foundation, WASAPI).
 - Backup e ripristino delle impostazioni; modalità **portable**.
 - Italiano e inglese; temi chiaro, scuro, OLED e **alto contrasto**; scala dell'interfaccia.
 - **Privacy Audit**: connessioni aperte in tempo reale, registro delle richieste, cartelle, "Cancella tutto".
-- **Aggiornamenti automatici** da GitHub Releases verificati con firma minisign e SHA-256, con rollback.
+- **Aggiornamenti automatici** da GitHub Releases verificati con SHA-256, con rollback.
 
 ## Installazione
 
@@ -110,7 +110,7 @@ Rust on top of Windows' own media APIs.
   CLI and token-protected loopback HTTP API ([docs/API.md](docs/API.md)); sandboxed WebAssembly plugins;
   settings backup/restore; portable mode; Italian/English; light, dark, OLED and high-contrast themes
   with UI scaling; Privacy Audit (live connections, request log, folders, delete everything);
-  signed auto-updates with rollback.
+  SHA-256-verified auto-updates with rollback.
 
 **Install:** grab the per-user installer or the portable zip from
 [Releases](https://github.com/troppofranco/hyper-clips/releases).

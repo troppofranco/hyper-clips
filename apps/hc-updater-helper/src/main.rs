@@ -11,7 +11,7 @@
 //! 4. start the new version with a health check; if it does not report
 //!    healthy within 30 s, restore the backup and restart the old version.
 //!
-//! The package was already verified (minisign + SHA-256) by the app.
+//! The package was already verified (SHA-256) by the app.
 
 #![windows_subsystem = "windows"]
 

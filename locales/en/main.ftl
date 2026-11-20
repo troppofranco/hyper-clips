@@ -239,7 +239,7 @@ upd-install = Install now
 upd-later = Later
 upd-ignore = Skip this version
 upd-downloading = Downloading and verifying { $version }…
-upd-privacy = Only api.github.com and github.com are contacted, with a generic User-Agent and no identifiers. Packages are verified with a signature and SHA-256 before installing.
+upd-privacy = Only api.github.com and github.com are contacted, with a generic User-Agent and no identifiers. Packages are verified with SHA-256 before installing.
 
 ## Phase 6: extras
 nav-vault = Vault

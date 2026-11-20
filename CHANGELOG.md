@@ -4,6 +4,9 @@ Formato: [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) · Versioni: [
 
 ## [0.1.0]
 
+### Modifiche
+- Rimossa la firma minisign degli aggiornamenti (e lo strumento `hc-sign`): i pacchetti vengono verificati con lo SHA-256 pubblicato in `checksums.txt`. Non servono più secret su GitHub per pubblicare una release.
+
 ### Fase 7 — Privacy Audit e rifinitura
 - **Privacy Audit** nello studio: connessioni TCP aperte in tempo reale da ogni processo di Hyper Clips (tabella di Windows via `GetExtendedTcpTable`), registro delle richieste in uscita, cartelle con dimensioni, spiegazione di cosa contengono i file, **cancellazione dei dati** selettiva (log, cache, indice, impostazioni, vault, clip) con conferma scritta.
 - Verificato che clip, registrazioni ed export non contengono metadati (date azzerate nei box MP4, nessun nome di software).

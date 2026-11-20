@@ -13,8 +13,8 @@ L'unica connessione automatica è il **controllo aggiornamenti** verso
 `api.github.com` / `github.com`: all'avvio, ogni N ore oppure mai (impostazioni).
 La richiesta usa uno User-Agent generico (`HyperClips-Updater`) e non contiene dati
 personali, identificativi o statistiche; ogni richiesta viene annotata in
-`logs\network.log`. Gli aggiornamenti vengono installati solo se la firma minisign
-e lo SHA-256 corrispondono.
+`logs\network.log`. Gli aggiornamenti vengono installati solo se lo SHA-256 del pacchetto corrisponde
+a quello pubblicato nella release.
 
 Tutto il resto parte solo su tua azione esplicita ed è spento di default:
 - **Condivisione in rete locale**: un piccolo server HTTP nello studio, raggiungibile
@@ -76,7 +76,7 @@ Il pannello **Privacy Audit** permette di verificarlo direttamente.
 ## English summary
 - No telemetry, analytics, automatic crash reports, accounts, cloud or remote fonts/CDNs.
 - The only automatic network request is the optional update check against GitHub
-  (generic User-Agent, logged in `logs\network.log`, packages verified with minisign + SHA-256).
+  (generic User-Agent, logged in `logs\network.log`, packages verified with SHA-256).
 - LAN sharing, the local API and plugins are off by default and start only when you enable them:
   LAN sharing is plain HTTP on your local network with a random token and expiry; the API listens on
   127.0.0.1 only and needs a token; plugins are sandboxed WebAssembly with no I/O at all.

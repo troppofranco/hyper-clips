@@ -7,14 +7,10 @@
    `crates/hc-updater/src/lib.rs` (`OWNER`, `REPO`).
 2. Le richieste usano lo User-Agent generico `HyperClips-Updater`, senza identificativi,
    e ognuna viene registrata in `logs\network.log`, consultabile dal Privacy Audit.
-3. Prima di installare, lo studio scarica `checksums.txt` e `checksums.txt.minisig`:
-   - verifica la firma **minisign (Ed25519)** con la chiave pubblica incorporata nell'app
-     (`keys/hyperclips.pub.b64`);
-   - pretende che il *trusted comment* sia `hyperclips <versione>`, per impedire che venga
-     riproposta una vecchia release firmata;
-   - scarica il pacchetto e ne confronta lo **SHA-256**.
-
-   Se un qualsiasi controllo fallisce, l'aggiornamento viene annullato.
+3. Prima di installare, lo studio scarica `checksums.txt` dalla release e confronta lo
+   **SHA-256** del pacchetto scaricato. Se non corrisponde, l'aggiornamento viene annullato.
+   Il controllo protegge da download corrotti o incompleti; l'autenticità dei pacchetti
+   dipende dalla sicurezza dell'account GitHub che pubblica le release (usa la 2FA).
 4. `hc-updater-helper.exe`, copiato in una cartella temporanea:
    - aspetta la chiusura dell'app e fa un backup dei file di programma;
    - installa il pacchetto: `Setup.exe /VERYSILENT` per la versione installata, estrazione
@@ -23,36 +19,8 @@
      **ripristina il backup** e riavvia la versione precedente. Il log è in `update.log`
      nella cartella dati.
 
-## Chiavi di firma
-La coppia di chiavi si genera **una sola volta**, fuori dal repository:
-
-```powershell
-cargo run -p hc-sign -- keygen "$env:USERPROFILE\.hyperclips-release-keys"
-```
-
-Vengono creati quattro file:
-- `hyperclips.pub` e `hyperclips.pub.b64`: chiave pubblica, da copiare in `keys/` e committare;
-- `hyperclips.key`: chiave segreta, cifrata con la password;
-- `hyperclips.password`: la password.
-
-**La chiave segreta e la password non vanno mai nel repository** (`.gitignore` le esclude).
-Conservane un backup offline: senza la chiave non potrai più pubblicare aggiornamenti
-che le installazioni esistenti accettino.
-
-### Configurare i secret di GitHub Actions
-Una volta sola, dalla cartella del progetto:
-
-```powershell
-Get-Content "$env:USERPROFILE\.hyperclips-release-keys\hyperclips.key" -Raw | gh secret set MINISIGN_SECRET_KEY --repo troppofranco/hyper-clips
-```
-```powershell
-Get-Content "$env:USERPROFILE\.hyperclips-release-keys\hyperclips.password" -Raw | gh secret set MINISIGN_PASSWORD --repo troppofranco/hyper-clips
-```
-
-### Rotazione della chiave
-Pubblica prima una release firmata con la chiave **vecchia** che contenga la nuova chiave
-pubblica. Da lì in poi firma con la chiave nuova.
-
+Non servono chiavi né secret su GitHub: il workflow usa solo il token automatico
+`GITHUB_TOKEN` per creare la release.
 ## Pubblicare una release
 1. Aggiorna `version` in `Cargo.toml` (`[workspace.package]`) e aggiungi a `CHANGELOG.md`
    una sezione `## [x.y.z]`.
@@ -66,7 +34,7 @@ git push origin v0.2.0
 3. Il workflow `release.yml`:
    - esegue i test e compila;
    - crea `HyperClips-<v>-portable.zip` e `HyperClips-Setup-<v>.exe` (Inno Setup);
-   - genera `checksums.txt` e lo firma;
+   - genera `checksums.txt` (SHA-256 di ogni file);
    - pubblica la release con le note prese dal CHANGELOG.
 
    I tag con un trattino (es. `v0.2.0-beta.1`) diventano pre-release, visibili solo
@@ -82,5 +50,3 @@ Opzioni per ridurre l'avviso:
 - **Azure Trusted Signing**: servizio a pagamento con canone mensile basso, con requisiti
   di verifica dell'identità.
 
-La firma minisign degli aggiornamenti è indipendente da queste opzioni: protegge
-l'auto-update anche senza certificato.

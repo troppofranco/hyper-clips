@@ -43,14 +43,14 @@ a batteria (`Config::effective`).
 | `crates/hc-detect` | gioco in primo piano (DB locale + euristica fullscreen) |
 | `crates/hc-library` | indice SQLite, tag, marker, quota, scansione, miniature |
 | `crates/hc-editor` | progetto, decodifica, rendering ed export su GPU, WebM, GIF/WebP, coda, momenti salienti |
-| `crates/hc-updater` | controllo release, verifica minisign + SHA-256, download |
+| `crates/hc-updater` | controllo release, download, verifica SHA-256 |
 | `crates/hc-share` | condivisione LAN temporanea (tiny_http) e QR code |
 | `crates/hc-vault` | vault cifrato (XChaCha20-Poly1305 a blocchi, Argon2id) |
 | `crates/hc-plugins` | host di plugin WebAssembly in sandbox (wasmi) |
 | `apps/hyperclips` | core, tray, CLI, API locale |
 | `apps/hyperclips-studio` | UI egui |
 | `apps/hc-updater-helper` | applicazione degli aggiornamenti con rollback |
-| `tools/hc-bench`, `tools/hc-sign` | misure e diagnostica; chiavi e firma dei rilasci |
+| `tools/hc-bench` | misure e diagnostica |
 
 Scelte rispetto al piano iniziale: nessun FFmpeg (decodifica ed export usano
 Media Foundation e Direct3D 11, quindi niente DLL di terze parti e nessun problema
