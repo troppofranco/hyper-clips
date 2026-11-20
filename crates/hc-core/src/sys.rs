@@ -175,6 +175,17 @@ pub fn exclude_from_wer(exe_names: &[&str]) {
     }
 }
 
+/// Local time as `YYYY-MM-DD HH-MM-SS` (safe in file names).
+pub fn local_timestamp() -> String {
+    use windows::Win32::System::SystemInformation::GetLocalTime;
+    // SAFETY: plain query.
+    let t = unsafe { GetLocalTime() };
+    format!(
+        "{:04}-{:02}-{:02} {:02}-{:02}-{:02}",
+        t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond
+    )
+}
+
 /// PIDs of running processes whose image name matches `exe_name` (case-insensitive).
 pub fn find_processes(exe_name: &str) -> Vec<u32> {
     use windows::Win32::System::Diagnostics::ToolHelp::{

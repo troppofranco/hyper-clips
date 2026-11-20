@@ -1,6 +1,5 @@
 /target
 /dist
-/data
 portable.flag
 *.pdb
 *.key

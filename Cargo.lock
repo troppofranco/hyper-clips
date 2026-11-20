@@ -1374,7 +1374,29 @@ dependencies = [
 name = "hc-bench"
 version = "0.1.0"
 dependencies = [
+ "crossbeam-channel",
+ "hc-capture",
  "hc-core",
+ "hc-encode",
+ "hc-recorder",
+ "windows",
+]
+
+[[package]]
+name = "hc-buffer"
+version = "0.1.0"
+dependencies = [
+ "hc-core",
+]
+
+[[package]]
+name = "hc-capture"
+version = "0.1.0"
+dependencies = [
+ "crossbeam-channel",
+ "hc-core",
+ "thiserror 2.0.21",
+ "tracing",
  "windows",
 ]
 
@@ -1395,9 +1417,43 @@ dependencies = [
 ]
 
 [[package]]
+name = "hc-detect"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "toml",
+ "tracing",
+ "windows",
+]
+
+[[package]]
+name = "hc-encode"
+version = "0.1.0"
+dependencies = [
+ "hc-core",
+ "thiserror 2.0.21",
+ "tracing",
+ "windows",
+]
+
+[[package]]
 name = "hc-hotkeys"
 version = "0.1.0"
 dependencies = [
+ "thiserror 2.0.21",
+ "tracing",
+ "windows",
+]
+
+[[package]]
+name = "hc-recorder"
+version = "0.1.0"
+dependencies = [
+ "crossbeam-channel",
+ "hc-buffer",
+ "hc-capture",
+ "hc-core",
+ "hc-encode",
  "thiserror 2.0.21",
  "tracing",
  "windows",
@@ -1427,8 +1483,11 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "crossbeam-channel",
+ "hc-capture",
  "hc-core",
+ "hc-detect",
  "hc-hotkeys",
+ "hc-recorder",
  "tracing",
  "windows",
 ]

@@ -102,6 +102,11 @@ pub fn run(cmd: Command) -> ExitCode {
                 hc_core::sys::format_bytes(s.working_set_bytes),
                 hc_core::sys::format_bytes(s.private_bytes)
             );
+            println!(
+                "replay buffer: {} (working set excluding buffer: {})",
+                hc_core::sys::format_bytes(s.buffer_bytes),
+                hc_core::sys::format_bytes(s.working_set_bytes.saturating_sub(s.buffer_bytes))
+            );
             println!("replay: {}, recording: {}", s.replay_active, s.recording);
             for c in &s.hotkey_conflicts {
                 println!(

@@ -1,0 +1,99 @@
+# Local game database: executable names (case-insensitive) -> display name.
+# Users can add entries in <config dir>/games.toml with the same format.
+# Unknown applications covering a whole monitor are also treated as games.
+
+[[game]]
+name = "Counter-Strike 2"
+exe = ["cs2.exe"]
+
+[[game]]
+name = "VALORANT"
+exe = ["VALORANT-Win64-Shipping.exe"]
+
+[[game]]
+name = "League of Legends"
+exe = ["League of Legends.exe"]
+
+[[game]]
+name = "Fortnite"
+exe = ["FortniteClient-Win64-Shipping.exe"]
+
+[[game]]
+name = "Minecraft"
+exe = ["javaw.exe", "Minecraft.Windows.exe"]
+
+[[game]]
+name = "Rocket League"
+exe = ["RocketLeague.exe"]
+
+[[game]]
+name = "Apex Legends"
+exe = ["r5apex.exe", "r5apex_dx12.exe"]
+
+[[game]]
+name = "Overwatch 2"
+exe = ["Overwatch.exe"]
+
+[[game]]
+name = "Dota 2"
+exe = ["dota2.exe"]
+
+[[game]]
+name = "Grand Theft Auto V"
+exe = ["GTA5.exe", "GTA5_Enhanced.exe"]
+
+[[game]]
+name = "Rainbow Six Siege"
+exe = ["RainbowSix.exe", "RainbowSix_Vulkan.exe"]
+
+[[game]]
+name = "Call of Duty"
+exe = ["cod.exe", "ModernWarfare.exe", "BlackOps6.exe"]
+
+[[game]]
+name = "PUBG: Battlegrounds"
+exe = ["TslGame.exe"]
+
+[[game]]
+name = "Rust"
+exe = ["RustClient.exe"]
+
+[[game]]
+name = "Elden Ring"
+exe = ["eldenring.exe"]
+
+[[game]]
+name = "Cyberpunk 2077"
+exe = ["Cyberpunk2077.exe"]
+
+[[game]]
+name = "Roblox"
+exe = ["RobloxPlayerBeta.exe"]
+
+[[game]]
+name = "Geometry Dash"
+exe = ["GeometryDash.exe"]
+
+[[game]]
+name = "Marvel Rivals"
+exe = ["Marvel-Win64-Shipping.exe"]
+
+[[game]]
+name = "Deadlock"
+exe = ["deadlock.exe"]
+
+[[game]]
+name = "The Finals"
+exe = ["Discovery.exe"]
+
+[[game]]
+name = "Destiny 2"
+exe = ["destiny2.exe"]
+
+[[game]]
+name = "Team Fortress 2"
+exe = ["tf_win64.exe", "hl2.exe"]
+
+[[game]]
+name = "osu!"
+exe = ["osu!.exe"]

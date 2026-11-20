@@ -12,7 +12,12 @@ publish = false
 
 [workspace.dependencies]
 hc-core = { path = "crates/hc-core" }
+hc-buffer = { path = "crates/hc-buffer" }
+hc-capture = { path = "crates/hc-capture" }
+hc-detect = { path = "crates/hc-detect" }
+hc-encode = { path = "crates/hc-encode" }
 hc-hotkeys = { path = "crates/hc-hotkeys" }
+hc-recorder = { path = "crates/hc-recorder" }
 
 clap = { version = "4.6.9", default-features = false, features = ["std", "derive", "help", "usage", "error-context"] }
 crossbeam-channel = "0.5.17"

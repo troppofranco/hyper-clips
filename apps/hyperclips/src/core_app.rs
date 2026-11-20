@@ -21,15 +21,21 @@ use windows::Win32::UI::HiDpi::{
 const NIN_SELECT: u32 = 0x0400;
 const NIN_KEYSELECT: u32 = 0x0401;
 use windows::Win32::UI::WindowsAndMessaging::{
-    DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW, MSG, PostQuitMessage,
-    RegisterWindowMessageW, TranslateMessage, WM_CONTEXTMENU, WM_DESTROY, WM_HOTKEY, WM_INPUT,
-    WM_RBUTTONUP,
+    DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW, KillTimer, MSG, PostQuitMessage,
+    RegisterWindowMessageW, SetTimer, TranslateMessage, WM_CONTEXTMENU, WM_DESTROY, WM_HOTKEY,
+    WM_INPUT, WM_RBUTTONUP, WM_TIMER,
 };
 use windows::core::w;
 
+use crate::capture::CaptureCtl;
 use crate::ipc_server::{Envelope, IpcServer};
 use crate::studio;
-use crate::tray::{MenuCmd, Tray, WM_APP_IPC, WM_APP_TRAY};
+use crate::tray::{MenuCmd, Tray, WM_APP_CAPTURE, WM_APP_IPC, WM_APP_TRAY};
+use hc_recorder::Event;
+
+/// Game detection interval (ms).
+const DETECT_TIMER_ID: usize = 1;
+const DETECT_INTERVAL_MS: u32 = 3000;
 
 const INSTANCE_MUTEX: &str = "HyperClips.Core";
 
@@ -44,6 +50,7 @@ struct App {
     ipc_rx: Receiver<Envelope>,
     started: Instant,
     taskbar_created: u32,
+    capture: CaptureCtl,
 }
 
 thread_local! {
@@ -104,6 +111,7 @@ pub fn run(background: bool) -> ExitCode {
         conflicts: Vec::new(),
         ipc_rx,
         started: t0,
+        capture: CaptureCtl::new(hwnd, &paths),
         // SAFETY: constant string.
         taskbar_created: unsafe { RegisterWindowMessageW(w!("TaskbarCreated")) },
         paths,
@@ -121,6 +129,12 @@ pub fn run(background: bool) -> ExitCode {
         init_ms = t0.elapsed().as_millis() as u64,
         "tray ready"
     );
+    app.capture.tick(&app.config);
+    app.capture.sync(&app.config);
+    // SAFETY: timer owned by our window, killed on destroy.
+    unsafe {
+        SetTimer(Some(hwnd), DETECT_TIMER_ID, DETECT_INTERVAL_MS, None);
+    }
     if !background && let Err(e) = studio::open(&app.paths) {
         tracing::warn!(error = %e, "could not open studio");
     }
@@ -131,6 +145,7 @@ pub fn run(background: bool) -> ExitCode {
     if let Some(s) = ipc.as_mut() {
         s.stop();
     }
+    // Dropping the app stops capture and finalises any running recording.
     APP.with(|cell| cell.borrow_mut().take());
     tracing::info!("core stopped");
     ExitCode::SUCCESS
@@ -224,14 +239,100 @@ impl App {
                 Ok(()) => Response::Ok,
                 Err(e) => Response::Error(e),
             },
-            // Capture subsystem arrives in Phase 2.
-            Action::SaveClip | Action::ToggleRecording | Action::Screenshot | Action::AddMarker => {
+            Action::SaveClip => {
+                let r = self.capture.save_clip(&self.config, &self.paths);
+                self.action_result(action, r)
+            }
+            Action::ToggleRecording => {
+                let r = self
+                    .capture
+                    .toggle_recording(&self.config, &self.paths)
+                    .map(|_| ());
+                self.action_result(action, r)
+            }
+            Action::Screenshot => {
+                let r = self.capture.screenshot(&self.config, &self.paths);
+                self.action_result(action, r)
+            }
+            Action::AddMarker => {
+                let r = self.capture.add_marker();
+                self.action_result(action, r)
+            }
+        }
+    }
+
+    fn action_result(&self, action: Action, r: Result<(), String>) -> Response {
+        match r {
+            Ok(()) => Response::Ok,
+            Err(reason) => {
                 let label = self.i18n.tr(&format!("action-{}", action.id()));
-                let msg = self
-                    .i18n
-                    .tr_args("notify-unavailable", &[("action", &label)]);
-                self.toast(&msg, false);
-                Response::Unavailable("capture is not implemented yet (phase 2)".into())
+                let msg = self.i18n.tr_args(
+                    "notify-unavailable",
+                    &[("action", &label), ("reason", &reason)],
+                );
+                self.toast(&msg, true);
+                Response::Unavailable(reason)
+            }
+        }
+    }
+
+    fn on_capture_events(&mut self) {
+        while let Ok(ev) = self.capture.events.try_recv() {
+            match ev {
+                Event::Started {
+                    encoder,
+                    hardware,
+                    width,
+                    height,
+                    monitor,
+                } => {
+                    tracing::info!(%encoder, hardware, width, height, %monitor, "capture running");
+                    self.capture.encoder = Some(encoder);
+                }
+                Event::ClipSaved { path, seconds } => {
+                    tracing::info!(path = %hc_core::paths::redact(&path), seconds, "clip saved");
+                    let game = self
+                        .capture
+                        .game
+                        .as_ref()
+                        .map_or("Desktop", |g| g.name.as_str())
+                        .to_owned();
+                    let msg = self.i18n.tr_args(
+                        "notify-clip-saved",
+                        &[("seconds", &format!("{seconds:.0}")), ("game", &game)],
+                    );
+                    self.toast(&msg, false);
+                }
+                Event::RecordingStarted { .. } => {
+                    self.toast(&self.i18n.tr("notify-recording-started"), false);
+                    self.tray.set_tooltip(&self.tooltip());
+                }
+                Event::RecordingStopped {
+                    path,
+                    seconds,
+                    markers,
+                } => {
+                    tracing::info!(path = %hc_core::paths::redact(&path), seconds, markers, "recording saved");
+                    let total = seconds as u64;
+                    let duration = format!("{}:{:02}", total / 60, total % 60);
+                    let msg = self.i18n.tr_args(
+                        "notify-recording-stopped",
+                        &[("duration", &duration), ("markers", &markers.to_string())],
+                    );
+                    self.toast(&msg, false);
+                    self.tray.set_tooltip(&self.tooltip());
+                    // Free capture resources if replay is off.
+                    self.capture.sync(&self.config);
+                }
+                Event::MarkerAdded { .. } => self.toast(&self.i18n.tr("notify-marker"), false),
+                Event::ScreenshotSaved { path } => {
+                    tracing::info!(path = %hc_core::paths::redact(&path), "screenshot saved");
+                    self.toast(&self.i18n.tr("notify-screenshot"), false);
+                }
+                Event::Error(e) => {
+                    tracing::warn!(error = %e, "capture error");
+                    self.toast(&self.i18n.tr_args("notify-error", &[("error", &e)]), true);
+                }
             }
         }
     }
@@ -240,13 +341,27 @@ impl App {
         match Config::load(&self.paths.config_file()) {
             Ok(cfg) => {
                 let lang_changed = cfg.general.language != self.config.general.language;
-                self.config = cfg;
                 if lang_changed {
                     self.i18n =
                         Localizer::new(&self.config.general.language, Some(&self.paths.exe_dir));
                 }
+                let capture_changed =
+                    cfg.capture != self.config.capture || cfg.audio != self.config.audio;
+                let only_duration = capture_changed && {
+                    let mut a = cfg.capture.clone();
+                    a.replay_seconds = self.config.capture.replay_seconds;
+                    a == self.config.capture && cfg.audio == self.config.audio
+                };
+                self.config = cfg;
                 apply_system_settings(&self.paths, &self.config);
                 self.apply_hotkeys();
+                if only_duration {
+                    self.capture
+                        .set_replay_seconds(self.config.capture.replay_seconds);
+                } else if capture_changed && !self.capture.is_recording() {
+                    self.capture.stop();
+                }
+                self.capture.sync(&self.config);
                 self.tray.set_tooltip(&self.tooltip());
                 tracing::info!("config reloaded");
                 Response::Reloaded {
@@ -264,10 +379,11 @@ impl App {
             mode: self.paths.mode,
             pid: std::process::id(),
             uptime_secs: self.started.elapsed().as_secs(),
-            recording: false,
-            replay_active: false,
+            recording: self.capture.is_recording(),
+            replay_active: self.capture.is_running() && self.config.capture.replay_enabled,
             working_set_bytes: mem.working_set,
             private_bytes: mem.private_bytes,
+            buffer_bytes: self.capture.buffer_bytes() as u64,
             hotkey_conflicts: self.conflicts.clone(),
         }
     }
@@ -351,8 +467,23 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             }
             LRESULT(0)
         }
+        WM_APP_CAPTURE => {
+            with_app(App::on_capture_events);
+            LRESULT(0)
+        }
+        WM_TIMER if wparam.0 == DETECT_TIMER_ID => {
+            with_app(|app| app.capture.tick(&app.config));
+            LRESULT(0)
+        }
         WM_DESTROY => {
-            with_app(|app| app.tray.remove());
+            // SAFETY: our own timer.
+            unsafe {
+                let _ = KillTimer(Some(hwnd), DETECT_TIMER_ID);
+            }
+            with_app(|app| {
+                app.capture.stop();
+                app.tray.remove();
+            });
             // SAFETY: ends the message loop.
             unsafe { PostQuitMessage(0) };
             LRESULT(0)

@@ -8,6 +8,7 @@ pub mod config;
 pub mod i18n;
 pub mod ipc;
 pub mod logging;
+pub mod media;
 pub mod paths;
 pub mod sys;
 

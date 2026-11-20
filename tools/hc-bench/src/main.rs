@@ -8,6 +8,8 @@
 //!       Measures this process's memory before/after creating a D3D11 device
 //!       on each hardware adapter (driver user-mode cost, Phase 2 risk).
 
+mod media;
+
 use std::io::Write;
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
@@ -29,9 +31,28 @@ fn main() -> ExitCode {
             let secs = args.get(1).and_then(|s| s.parse().ok()).unwrap_or(5);
             spike_d3d11(secs)
         }
+        Some("encoders") => media::encoders(),
+        Some("dd-diag") => media::dd_diag(),
+        Some("spike-pipeline") => media::spike_pipeline(args.get(1).map(String::as_str)),
+        Some("probe") if args.len() >= 2 => media::probe(&args[1]),
+        Some("frame") if args.len() >= 3 => {
+            let at = args
+                .get(3)
+                .and_then(|s| s.parse::<f64>().ok())
+                .unwrap_or(1.0);
+            media::frame(&args[1], &args[2], at)
+        }
+        Some("service-test") if args.len() >= 3 => {
+            let secs = args[1].parse().unwrap_or(5);
+            media::service_test(secs, &args[2], args.iter().any(|a| a == "--mic"))
+        }
+        Some("video-test") if args.len() >= 3 => {
+            let secs = args[1].parse().unwrap_or(5);
+            media::video_test(secs, &args[2], args.get(3).map(String::as_str))
+        }
         _ => {
             eprintln!(
-                "usage: hc-bench sample <exe-name> [seconds] [csv]\n       hc-bench spike-d3d11 [seconds]"
+                "usage: hc-bench sample <exe-name> [seconds] [csv]\n       hc-bench spike-d3d11 [seconds]\n       hc-bench encoders\n       hc-bench probe <file.mp4>\n       hc-bench video-test <seconds> <out.mp4> [h264|hevc]"
             );
             ExitCode::from(2)
         }

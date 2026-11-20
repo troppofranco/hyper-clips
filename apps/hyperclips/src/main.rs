@@ -1,9 +1,10 @@
-//! Hyper Clips core process: tray icon, global hotkeys, IPC server and
-//! (from Phase 2) the capture/replay service. Deliberately free of any GUI
-//! toolkit, media framework or network stack to keep its footprint small.
+//! Hyper Clips core process: tray icon, global hotkeys, IPC server and the
+//! capture/replay service. Uses only OS media APIs (DXGI, D3D11, Media
+//! Foundation, WASAPI): no GUI toolkit, third-party codec or network stack.
 
 #![windows_subsystem = "windows"]
 
+mod capture;
 mod cli;
 mod core_app;
 mod ipc_server;

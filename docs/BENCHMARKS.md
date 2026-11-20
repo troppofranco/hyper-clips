@@ -52,3 +52,38 @@ device (on the adapter driving the captured monitor) and only while capture is
 active; the projected core budget is ~16 + 29 + encoder session, which keeps
 the < 60 MB working-set goal reachable but tight. Private bytes will exceed
 60 MB and will be reported honestly alongside the working set.
+
+## Phase 2 — 2026-11-20 (capture)
+
+Settings: 1920×1080 @ 60 fps H.264 VBR 20 Mbps (NVIDIA H.264 Encoder MFT on
+RTX 5070), source monitor 2560×1440, system audio AAC 160 kbps, Instant
+Replay 60 s in RAM, a game running fullscreen on the captured monitor.
+
+| Scenario | Working set | Private | CPU avg |
+|---|---|---|---|
+| Core, replay active, 70 s (`hc-bench sample`) | 80–103 MB | 130–152 MB | **0.10 %** |
+| — of which replay buffer (`--status`) | 21.4 MB | | |
+| **Core excluding buffer** | **81 MB** | ~131 MB | |
+
+Pipeline cost by stage (`hc-bench spike-pipeline`, bare process):
+
+| Stage | Working set | Private |
+|---|---|---|
+| baseline + COM/Media Foundation | 7.9 MB | 1.5 MB |
+| + D3D11 device (NVIDIA driver) | +27.8 | +51.5 |
+| + Desktop Duplication, first frame | +0.5 | +15.4 |
+| + NV12 converter (8 surfaces; now 4) | +1.0 | +29.7 |
+| + NVIDIA H.264 Encoder MFT | +16.7 | +32.1 |
+| + 2 s of encoding | +7.7 | +0.9 |
+| + AAC encoder | +0.7 | +0.2 |
+
+**Target miss:** the < 60 MB working-set goal (excluding buffer) is not met
+(81 MB). ~45 MB is GPU driver + NVENC MFT user-mode memory that any capture
+app on this driver pays. Planned mitigations (Phase 7): native NVENC
+backend without the MFT layer, smaller surface pools, encoder session
+created lazily. Startup to tray stays at 21 ms; the capture pipeline is
+ready 250 ms later.
+
+Encode submit time: 0.15 ms/frame on the capture thread (`hc-bench video-test`).
+Game FPS impact not yet measured (needs PresentMon on a reproducible
+benchmark: run by the user, see CONTRIBUTING).

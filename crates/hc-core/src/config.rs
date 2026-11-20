@@ -27,6 +27,7 @@ pub enum ConfigError {
 pub struct Config {
     pub general: General,
     pub capture: Capture,
+    pub audio: Audio,
     pub hotkeys: Hotkeys,
     pub notifications: Notifications,
     pub privacy: Privacy,
@@ -118,6 +119,8 @@ pub struct Capture {
     pub rate_control: RateControl,
     pub bitrate_kbps: u32,
     pub cqp: u8,
+    pub monitor: MonitorChoice,
+    pub screenshot_format: ScreenshotFormat,
 }
 
 impl Default for Capture {
@@ -132,6 +135,51 @@ impl Default for Capture {
             rate_control: RateControl::Vbr,
             bitrate_kbps: 20_000,
             cqp: 23,
+            monitor: MonitorChoice::Game,
+            screenshot_format: ScreenshotFormat::Png,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum MonitorChoice {
+    /// Monitor showing the foreground window (the game) when capture starts.
+    #[default]
+    Game,
+    Primary,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ScreenshotFormat {
+    #[default]
+    Png,
+    Jpg,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Audio {
+    /// Everything the PC plays (game, music, chat).
+    pub system: bool,
+    /// Off by default: recording the microphone must be an explicit choice.
+    pub microphone: bool,
+    /// Percent, 0..=200.
+    pub system_volume: u32,
+    pub microphone_volume: u32,
+    /// AAC bitrate in kbps (96/128/160/192).
+    pub bitrate_kbps: u32,
+}
+
+impl Default for Audio {
+    fn default() -> Self {
+        Self {
+            system: true,
+            microphone: false,
+            system_volume: 100,
+            microphone_volume: 100,
+            bitrate_kbps: 160,
         }
     }
 }
@@ -298,6 +346,9 @@ impl Config {
         if c.height != 0 {
             c.height = c.height.clamp(360, 4320);
         }
+        self.audio.system_volume = self.audio.system_volume.min(200);
+        self.audio.microphone_volume = self.audio.microphone_volume.min(200);
+        self.audio.bitrate_kbps = self.audio.bitrate_kbps.clamp(96, 192);
         self.updates.interval_hours = self.updates.interval_hours.clamp(1, 24 * 30);
         if self.general.language.trim().is_empty() {
             self.general.language = "auto".into();

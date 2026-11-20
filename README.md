@@ -6,14 +6,15 @@ Registra e gestisci le clip dei tuoi giochi su Windows, con un consumo di
 memoria minimo e **privacy totale**: nessun account, nessuna telemetria,
 nessun tracker. Scritto in Rust.
 
-> ⚠️ **Stato: sviluppo iniziale (Fase 1 di 7).** Ci sono già tray, hotkey globali,
-> configurazione, CLI e finestra delle impostazioni. La cattura video arriva nella Fase 2.
+> ⚠️ **Stato: sviluppo iniziale (Fase 2 di 7).** Funzionano Instant Replay, salvataggio clip,
+> registrazione, marker e screenshot con encoder hardware e audio di sistema e microfono.
+> Libreria ed editor arrivano nelle Fasi 3 e 4.
 
 ## Perché
 
 | | Hyper Clips | App basate su Electron |
 |---|---|---|
-| RAM in background | ~16 MB (Fase 1, solo tray) | centinaia di MB |
+| RAM in background | ~16 MB solo tray · ~81 MB con replay attivo (buffer escluso) | centinaia di MB |
 | Telemetria / account | nessuna / nessuno | spesso obbligatori |
 | Rete | solo il controllo aggiornamenti verso GitHub (disattivabile) | continua |
 
@@ -50,8 +51,8 @@ Licenza: [GPL-3.0-or-later](LICENSE).
 Record and manage game clips on Windows with a tiny memory footprint and
 **complete privacy**: no account, no telemetry, no trackers. Written in Rust.
 
-> ⚠️ **Status: early development (phase 1 of 7).** Tray, global hotkeys,
-> configuration, CLI and the settings window work. Video capture lands in phase 2.
+> ⚠️ **Status: early development (phase 2 of 7).** Instant Replay, clip saving,
+> recording, markers and screenshots work with hardware encoding and system/mic audio.
 
 **Build:** `cargo build --release` (Windows 10 22H2+/11, Rust stable MSVC).
 Put an empty `portable.flag` next to `hyperclips.exe` for a self-contained test run.

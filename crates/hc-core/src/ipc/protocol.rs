@@ -84,6 +84,8 @@ pub struct CoreStatus {
     pub replay_active: bool,
     pub working_set_bytes: u64,
     pub private_bytes: u64,
+    /// Encoded media held by the replay buffer (excluded from RAM targets).
+    pub buffer_bytes: u64,
     pub hotkey_conflicts: Vec<HotkeyConflict>,
 }
 
@@ -171,6 +173,7 @@ mod tests {
             replay_active: false,
             working_set_bytes: 1 << 24,
             private_bytes: 1 << 23,
+            buffer_bytes: 0,
             hotkey_conflicts: vec![HotkeyConflict {
                 action: "save-clip".into(),
                 binding: "F8".into(),

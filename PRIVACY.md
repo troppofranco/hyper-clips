@@ -15,9 +15,14 @@ La richiesta usa uno User-Agent generico e non contiene alcun dato personale.
 Le funzioni di condivisione (webhook Discord, server LAN, upload) partono solo
 su azione esplicita e sono disattivate di default.
 
-Nella Fase 1 l'app **non apre alcuna connessione di rete**. L'unico canale di
+Ad oggi (Fase 2) l'app **non apre alcuna connessione di rete**. L'unico canale di
 comunicazione è una named pipe locale, accessibile solo all'utente corrente e
 chiusa ai client remoti.
+
+## Cattura
+- Il **microfono è disattivato di default**: va attivato esplicitamente nelle impostazioni.
+- Il riconoscimento del gioco legge solo il nome dell'eseguibile della finestra in primo piano, con un handle di sola interrogazione: non legge la memoria dei processi e non inietta nulla. Il database dei giochi è un file locale (`games.toml`).
+- Le clip non contengono metadati: né titolo, né software, né date nel file. Il nome del gioco compare solo nel nome del file e della cartella.
 
 ## Dati salvati in locale
 

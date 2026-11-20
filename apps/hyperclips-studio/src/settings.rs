@@ -3,7 +3,8 @@
 
 use eframe::egui;
 use hc_core::config::{
-    Config, Hotkeys, REPLAY_MAX_SECS, REPLAY_MIN_SECS, Theme, UpdateChannel, UpdateCheck,
+    Codec, Config, Hotkeys, MonitorChoice, REPLAY_MAX_SECS, REPLAY_MIN_SECS, RateControl,
+    ScreenshotFormat, Theme, UpdateChannel, UpdateCheck,
 };
 use hc_core::i18n::{Localizer, available_languages};
 use hc_core::ipc::{HotkeyConflict, Request, Response};
@@ -193,7 +194,66 @@ impl SettingsPage {
                             .speed(250),
                     );
                     ui.end_row();
+
+                    ui.label(i.tr("settings-codec"));
+                    ui.horizontal(|ui| {
+                        ui.radio_value(&mut c.codec, Codec::H264, "H.264");
+                        ui.radio_value(&mut c.codec, Codec::Hevc, "HEVC");
+                    });
+                    ui.end_row();
+
+                    ui.label(i.tr("settings-rate-control"));
+                    ui.horizontal(|ui| {
+                        ui.radio_value(&mut c.rate_control, RateControl::Vbr, "VBR");
+                        ui.radio_value(&mut c.rate_control, RateControl::Cbr, "CBR");
+                        ui.radio_value(&mut c.rate_control, RateControl::Cqp, "CQP");
+                        if c.rate_control == RateControl::Cqp {
+                            ui.add(egui::DragValue::new(&mut c.cqp).range(1..=51));
+                        }
+                    });
+                    ui.end_row();
+
+                    ui.label(i.tr("settings-monitor"));
+                    ui.horizontal(|ui| {
+                        ui.radio_value(&mut c.monitor, MonitorChoice::Game, i.tr("monitor-game"));
+                        ui.radio_value(
+                            &mut c.monitor,
+                            MonitorChoice::Primary,
+                            i.tr("monitor-primary"),
+                        );
+                    });
+                    ui.end_row();
+
+                    ui.label(i.tr("settings-screenshot-format"));
+                    ui.horizontal(|ui| {
+                        ui.radio_value(&mut c.screenshot_format, ScreenshotFormat::Png, "PNG");
+                        ui.radio_value(&mut c.screenshot_format, ScreenshotFormat::Jpg, "JPG");
+                    });
+                    ui.end_row();
                 });
+        });
+        let a = &mut self.draft.audio;
+        section(ui, &i.tr("settings-audio"), |ui| {
+            egui::Grid::new("audio")
+                .num_columns(2)
+                .spacing([16.0, 8.0])
+                .show(ui, |ui| {
+                    ui.checkbox(&mut a.system, i.tr("settings-audio-system"));
+                    ui.add_enabled(
+                        a.system,
+                        egui::Slider::new(&mut a.system_volume, 0..=200)
+                            .text(i.tr("settings-volume")),
+                    );
+                    ui.end_row();
+                    ui.checkbox(&mut a.microphone, i.tr("settings-audio-mic"));
+                    ui.add_enabled(
+                        a.microphone,
+                        egui::Slider::new(&mut a.microphone_volume, 0..=200)
+                            .text(i.tr("settings-volume")),
+                    );
+                    ui.end_row();
+                });
+            ui.small(i.tr("settings-audio-hint"));
         });
     }
 

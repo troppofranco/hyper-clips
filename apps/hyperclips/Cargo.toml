@@ -15,7 +15,10 @@ path = "src/main.rs"
 [dependencies]
 clap.workspace = true
 crossbeam-channel.workspace = true
+hc-capture.workspace = true
 hc-core.workspace = true
+hc-detect.workspace = true
+hc-recorder.workspace = true
 hc-hotkeys.workspace = true
 tracing.workspace = true
 

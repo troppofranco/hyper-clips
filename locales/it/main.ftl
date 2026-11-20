@@ -19,7 +19,13 @@ action-add-marker = Aggiungi marker
 action-open-studio = Apri Hyper Clips
 
 ## Notifiche
-notify-unavailable = { $action }: la cattura non è ancora disponibile.
+notify-unavailable = { $action }: non disponibile ({ $reason }).
+notify-clip-saved = Clip salvata: { $seconds } s — { $game }
+notify-recording-started = Registrazione avviata
+notify-recording-stopped = Registrazione salvata ({ $duration }, { $markers } marker)
+notify-marker = Marker aggiunto
+notify-screenshot = Screenshot salvato
+notify-error = Errore: { $error }
 notify-hotkey-conflicts = Alcune hotkey non sono state registrate. Apri le impostazioni per correggerle.
 notify-already-running = Hyper Clips è già in esecuzione.
 
@@ -75,3 +81,16 @@ mode-portable = portable
 ## Barra di stato
 status-core-connected = Core v{ $version } · { $core_mem } · Studio { $ui_mem }
 status-core-missing = Servizio core non in esecuzione
+
+## Impostazioni — cattura e audio
+settings-codec = Codec video
+settings-rate-control = Controllo bitrate
+settings-monitor = Monitor
+monitor-game = Monitor del gioco
+monitor-primary = Monitor principale
+settings-screenshot-format = Formato screenshot
+settings-audio = Audio
+settings-audio-system = Registra l'audio di sistema (gioco, musica, chat)
+settings-audio-mic = Registra il microfono
+settings-volume = Volume (%)
+settings-audio-hint = Con entrambe le sorgenti attive le clip contengono una traccia mixata più tracce separate per l'editing.

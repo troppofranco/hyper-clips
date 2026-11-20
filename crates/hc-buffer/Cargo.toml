@@ -1,0 +1,15 @@
+[package]
+name = "hc-buffer"
+description = "Instant Replay ring buffer of encoded packets"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+hc-core.workspace = true
+
+[lints]
+workspace = true

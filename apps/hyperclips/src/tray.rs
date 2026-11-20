@@ -19,6 +19,7 @@ use windows::core::{HSTRING, PCWSTR, w};
 
 pub const WM_APP_TRAY: u32 = WM_APP + 1;
 pub const WM_APP_IPC: u32 = WM_APP + 2;
+pub const WM_APP_CAPTURE: u32 = WM_APP + 3;
 const TRAY_ID: u32 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

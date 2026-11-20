@@ -35,7 +35,11 @@ Framing: `u32` LE + `postcard`. Configurazione condivisa via `config.toml`
 | `apps/hyperclips` | core + tray + CLI | Fase 1 ✅ |
 | `apps/hyperclips-studio` | UI egui | Fase 1 (scheletro) ✅ |
 | `tools/hc-bench` | misure RAM/CPU, spike | Fase 1 ✅ |
-| `hc-capture`, `hc-encode`, `hc-buffer` | cattura, encoder, replay | Fase 2 |
+| `hc-capture` | Desktop Duplication, NV12 su GPU, WASAPI, mixer, screenshot WIC | Fase 2 ✅ |
+| `hc-encode` | encoder MF (HW/SW), AAC, muxer MP4, probe | Fase 2 ✅ |
+| `hc-buffer` | ring buffer di pacchetti codificati | Fase 2 ✅ |
+| `hc-recorder` | thread video/audio/sink, clip, registrazione, marker | Fase 2 ✅ |
+| `hc-detect` | gioco in primo piano (DB locale + euristica fullscreen) | Fase 2 ✅ (parziale) |
 | `hc-library`, `hc-media` | SQLite, FFmpeg, player | Fase 3 |
 | `hc-editor` | editor, export | Fase 4 |
 | `hc-updater`, `apps/hc-updater-helper` | auto-update | Fase 5 |
@@ -67,8 +71,31 @@ I crate vengono creati nella fase in cui servono, per non avere codice vuoto.
 | Crash | esclusione da Windows Error Reporting (per utente, solo installata) | nessun dump inviato a Microsoft |
 | i18n | Fluent, it/en incorporati, override in `locales/<lingua>/main.ftl` | |
 
+## Pipeline di cattura (Fase 2)
+
+```
+video : Desktop Duplication (monitor del gioco) → copia BGRA → D3D11 Video Processor
+        (scala + BGRA→NV12 BT.709, hardware fisso) → MFT encoder HW (zero copie)
+        → Annex-B → NAL con prefisso di lunghezza → sink
+audio : WASAPI loopback (sistema) + capture (mic) a 48 kHz → mixer allineato
+        al clock QPC (riempie i silenzi, assorbe jitter) → AAC ×N (mix + stem) → sink
+sink  : ring buffer (GOP interi, keyframe ogni 1 s) + registrazione MP4 dal vivo;
+        salvataggio clip in un thread separato (snapshot = copia di puntatori)
+```
+
+Tracce audio nelle clip: con sistema + microfono → traccia 1 = mix (attiva di default,
+è quella che riproducono Discord e i player), traccia 2 = sistema, traccia 3 = microfono
+(disattivate ma presenti per l'editor). Con una sola sorgente → una traccia.
+
+File: `<cartella clip>\<Gioco>\<Gioco> AAAA-MM-GG HH-MM-SS.mp4`, registrazioni con
+suffisso `REC`, screenshot in `Screenshots\`, marker in `<file>.markers.json`
+(importati nella libreria in Fase 3). Nessun metadato nel file (né titolo, né software,
+né date).
+
 ## Limiti noti (aggiornati)
 
+- **Fase 2 consegnata parzialmente.** Funzionano Instant Replay in RAM, clip, registrazione, marker, screenshot PNG/JPG, H.264/HEVC hardware con fallback software, audio di sistema e microfono con mix e stem, rilevamento del gioco e del suo monitor. **Restano da fare:** cattura per finestra o regione (WGC), audio per-processo (gioco/Discord separati), push-to-talk, noise gate e soppressione rumore, buffer su disco, HDR (oggi l'HDR viene catturato come SDR convertito da DXGI), cursore nel video (Desktop Duplication non lo compone), overlay in-game, webcam, AV1, backend NVENC/AMF nativi, screenshot WebP.
+- **RAM del core in cattura:** 81 MB di working set al netto del buffer, sopra l'obiettivo dei 60 MB (dettagli in BENCHMARKS).
 - **Win10 22H2:** WGC mostra un bordo giallo non rimovibile → Desktop Duplication per monitor e gioco fullscreen.
 - **Fullscreen esclusivo "vero":** possibili frame neri; niente hook (rischio anti-cheat) → suggerire il borderless.
 - **Hotkey solo tasto** (es. `F8`): `RegisterHotKey` le consuma globalmente, come Medal e ShadowPlay.
