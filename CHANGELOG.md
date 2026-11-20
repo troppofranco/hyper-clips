@@ -4,6 +4,12 @@ Formato: [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) · Versioni: [
 
 ## [Unreleased]
 
+### Fase 7 — Privacy Audit e rifinitura
+- **Privacy Audit** nello studio: connessioni TCP aperte in tempo reale da ogni processo di Hyper Clips (tabella di Windows via `GetExtendedTcpTable`), registro delle richieste in uscita, cartelle con dimensioni, spiegazione di cosa contengono i file, **cancellazione dei dati** selettiva (log, cache, indice, impostazioni, vault, clip) con conferma scritta.
+- Verificato che clip, registrazioni ed export non contengono metadati (date azzerate nei box MP4, nessun nome di software).
+- Documentazione completa in italiano e inglese: README, PRIVACY, ARCHITECTURE, BENCHMARKS, API.
+- Limiti noti dichiarati: RAM del core con cattura attiva ~117 MB (obiettivo 60 MB non raggiunto), WebM senza audio, WebP animato lossless.
+
 ### Fase 6 — Funzioni extra
 - **Momenti salienti locali**: analisi dell'audio della clip (sonorità a breve termine contro il fondo mobile), marker automatici con tag `highlight` dopo ogni salvataggio, pulsante "Trova momenti salienti" e `--highlights <id>`. Nessun modello, nessuna rete.
 - **Condivisione in rete locale con QR** (`hc-share`): link con token casuale a 128 bit, solo LAN, scadenza e limite di download, pagina con player e supporto Range per il seek dal telefono. Spenta finché non viene avviata da una clip; traffico HTTP non cifrato (dichiarato nell'interfaccia).

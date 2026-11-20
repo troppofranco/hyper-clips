@@ -10,6 +10,7 @@ pub mod i18n;
 pub mod ipc;
 pub mod logging;
 pub mod media;
+pub mod netaudit;
 pub mod paths;
 pub mod sys;
 

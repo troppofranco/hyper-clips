@@ -151,3 +151,34 @@ only while a clip is open (+~70 MB), and are released when it is closed.
 
 Animated WebP is lossless (no lossy encoder without libwebp), so files are
 large; GIF is usually the smaller choice.
+
+## Phases 5–7 — 2026-11-20 (final)
+
+Core with Instant Replay running (1080p60 H.264 NVENC via MF, system audio,
+separate tracks on), 25 s after start, RTX 5070, portable build:
+
+| Metric | Value | Target |
+|---|---|---|
+| Working set | 124 MB | — |
+| Replay buffer | 7.4 MB | excluded |
+| Working set excluding buffer | **~117 MB** | < 60 MB ❌ |
+| Core in tray, capture off | ~16 MB | ✅ |
+| CPU (25 s window) | ~1 s CPU time ≈ 4 % of one core, < 0.5 % of the 16-thread CPU | < 3 % ✅ |
+| Studio, library idle (1,000 clips) | ~89 MB | < 150 MB ✅ |
+| Studio with player open | ~165 MB | < 150 MB ❌ |
+
+The new Phase 6 features add nothing while unused: the local API, LAN sharing
+and plugins are off by default; the plugin interpreter is created only when
+plugins are enabled and freed when they are switched off.
+
+**Why the 60 MB goal is missed.** Most of the core's memory with capture on
+belongs to the graphics driver (D3D11 device, video processor) and the Media
+Foundation hardware encoder; separate per-process audio tracks cost ~29 MB on
+top. Our own allocations are a few MB. Realistic next steps: a native NVENC/AMF
+path without the MF wrapper, sharing one D3D11 device between capture and the
+encoder, and starting per-process audio capture only when a chat app is running.
+These were not done in this release.
+
+Updater: the helper rollback was tested with a corrupt package (a non-PE
+`hyperclips.exe`): the helper rejected it without a system dialog, restored the
+backup and restarted the previous version.

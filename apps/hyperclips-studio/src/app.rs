@@ -1,7 +1,7 @@
 use eframe::egui;
 use hc_core::config::Config;
 use hc_core::i18n::Localizer;
-use hc_core::paths::{AppPaths, InstallMode};
+use hc_core::paths::AppPaths;
 use hc_core::sys;
 
 use crate::core_link::CoreLink;
@@ -27,6 +27,7 @@ pub struct StudioApp {
     library: LibraryPage,
     editor: EditorPage,
     vault: crate::vault_page::VaultPage,
+    privacy: crate::privacy_page::PrivacyPage,
     core: CoreLink,
 }
 
@@ -53,6 +54,7 @@ impl StudioApp {
                     .clone()
                     .unwrap_or_else(|| paths.default_clips_dir.clone()),
             ),
+            privacy: crate::privacy_page::PrivacyPage::new(),
             settings: SettingsPage::new(config, &paths),
             page: Page::Library,
             i18n,
@@ -101,30 +103,6 @@ impl StudioApp {
             ui.small(text);
         });
     }
-
-    fn privacy(&self, ui: &mut egui::Ui) {
-        let i = &self.i18n;
-        ui.heading(i.tr("privacy-title"));
-        ui.add_space(8.0);
-        ui.label(i.tr("privacy-network"));
-        ui.add_space(8.0);
-        let mode = match self.paths.mode {
-            InstallMode::Installed => i.tr("mode-installed"),
-            InstallMode::Portable => i.tr("mode-portable"),
-        };
-        ui.label(i.tr_args("privacy-mode", &[("mode", &mode)]));
-        ui.add_space(8.0);
-        ui.strong(i.tr("privacy-folders"));
-        egui::Grid::new("privacy-folders")
-            .striped(true)
-            .show(ui, |ui| {
-                for dir in self.paths.owned_dirs() {
-                    ui.monospace(hc_core::paths::redact(dir));
-                    ui.label(sys::format_bytes(dir_size(dir)));
-                    ui.end_row();
-                }
-            });
-    }
 }
 
 impl eframe::App for StudioApp {
@@ -157,21 +135,11 @@ impl eframe::App for StudioApp {
                     self.i18n = Localizer::new(&saved.general.language, Some(&self.paths.exe_dir));
                 }
             }
-            Page::Privacy => self.privacy(ui),
+            Page::Privacy => {
+                let cfg = self.settings.saved().clone();
+                self.privacy
+                    .ui(ui, &self.i18n, &self.paths, &cfg, &self.core);
+            }
         });
     }
-}
-
-fn dir_size(dir: &std::path::Path) -> u64 {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return 0;
-    };
-    entries
-        .flatten()
-        .map(|e| match e.metadata() {
-            Ok(m) if m.is_dir() => dir_size(&e.path()),
-            Ok(m) => m.len(),
-            Err(_) => 0,
-        })
-        .sum()
 }

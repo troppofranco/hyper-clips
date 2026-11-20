@@ -1,52 +1,61 @@
 # Architettura di Hyper Clips
 
-Questo documento riassume la Fase 0 (piano approvato) e le decisioni prese
-durante lo sviluppo. Le misure stanno in [BENCHMARKS.md](BENCHMARKS.md).
+Questo documento riassume il piano iniziale (Fase 0) e le decisioni prese durante
+lo sviluppo (Fasi 1–7). Le misure stanno in [BENCHMARKS.md](BENCHMARKS.md).
 
 ## Processi
 
 ```
 hyperclips.exe (core, sempre attivo)
   tray Win32 · hotkey (RegisterHotKey + Raw Input) · server IPC (named pipe)
-  [Fase 2] cattura WGC/Desktop Duplication → NV12 su GPU → encoder HW
-           audio WASAPI multitraccia → AAC · ring buffer replay · fMP4
-  Nessun toolkit UI, nessun FFmpeg, nessuno stack di rete.
+  cattura Desktop Duplication / WGC → compositor D3D11 → NV12 → encoder HW (MF)
+  audio WASAPI + process loopback → AAC · ring buffer replay · muxer MP4
+  indicizzatore (libreria, miniature, momenti salienti, plugin WASM)
+  controllo aggiornamenti · API HTTP locale opzionale (127.0.0.1)
+  Nessun toolkit UI e nessuna libreria multimediale esterna.
 
 hyperclips-studio.exe (avviato su richiesta, termina alla chiusura)
-  egui · libreria · player · editor · impostazioni · privacy audit
-  [Fase 3+] FFmpeg (DLL) caricato solo qui; ruolo --worker per gli export
+  egui (glow) · libreria · player MF · editor · vault · condivisione LAN
+  impostazioni · privacy audit · ruolo --export-worker per la coda di export
 
-hc-updater-helper.exe [Fase 5]
-  sostituzione file / Setup silenzioso, health check, rollback
+hc-updater-helper.exe (copiato in %TEMP% durante un aggiornamento)
+  backup, Setup silenzioso o estrazione dello zip, health check, rollback
 ```
 
 Comunicazione: named pipe `\\.\pipe\HyperClips.<sessione>`, DACL che ammette
 solo l'utente corrente, `PIPE_REJECT_REMOTE_CLIENTS`, prima istanza esclusiva
 (anti-squatting), client con `SECURITY_IDENTIFICATION` (niente impersonation).
 Framing: `u32` LE + `postcard`. Configurazione condivisa via `config.toml`
-(il core la ricarica su `Request::ReloadConfig`).
+(il core la ricarica su `Request::ReloadConfig`). La configurazione "effettiva"
+usata dalla cattura è quella globale + profilo del gioco in primo piano + politica
+a batteria (`Config::effective`).
 
 ## Workspace
 
-| Crate | Ruolo | Stato |
-|---|---|---|
-| `crates/hc-core` | config, percorsi, logging, IPC, i18n, utility Win32 | Fase 1 ✅ |
-| `crates/hc-hotkeys` | parsing e registrazione hotkey | Fase 1 ✅ |
-| `apps/hyperclips` | core + tray + CLI | Fase 1 ✅ |
-| `apps/hyperclips-studio` | UI egui | Fase 1 (scheletro) ✅ |
-| `tools/hc-bench` | misure RAM/CPU, spike | Fase 1 ✅ |
-| `hc-capture` | Desktop Duplication (anche HDR), WGC finestra, regione, compositor D3D11 (cursore, tone-map, webcam), WASAPI + process loopback, DSP microfono, screenshot PNG/JPG/WebP | Fase 2 ✅ |
-| `hc-encode` | encoder MF (HW/SW), AAC, muxer MP4, probe | Fase 2 ✅ |
-| `hc-buffer` | ring buffer di pacchetti codificati | Fase 2 ✅ |
-| `hc-recorder` | thread video/audio/sink, clip, registrazione, marker | Fase 2 ✅ |
-| `hc-detect` | gioco in primo piano (DB locale + euristica fullscreen) | Fase 2 ✅ (parziale) |
-| `hc-library`, `hc-media` | SQLite, FFmpeg, player | Fase 3 |
-| `hc-editor` | editor, export | Fase 4 |
-| `hc-updater`, `apps/hc-updater-helper` | auto-update | Fase 5 |
-| `hc-detect`, `hc-privacy`, `hc-share`, `hc-plugins` | extra | Fase 6 |
+| Crate | Ruolo |
+|---|---|
+| `crates/hc-core` | config, profili, percorsi, logging, IPC, i18n, backup impostazioni, audit di rete, utility Win32 |
+| `crates/hc-hotkeys` | parsing e registrazione hotkey |
+| `crates/hc-capture` | Desktop Duplication (anche HDR), WGC, regione, compositor D3D11 (cursore, tone-map, webcam), WASAPI + process loopback, DSP microfono, screenshot |
+| `crates/hc-encode` | encoder Media Foundation (HW/SW, H.264/HEVC/AV1), AAC, muxer MP4, probe |
+| `crates/hc-buffer` | ring buffer di pacchetti codificati (RAM o disco) |
+| `crates/hc-recorder` | thread video/audio/sink, clip, registrazione, marker |
+| `crates/hc-detect` | gioco in primo piano (DB locale + euristica fullscreen) |
+| `crates/hc-library` | indice SQLite, tag, marker, quota, scansione, miniature |
+| `crates/hc-editor` | progetto, decodifica, rendering ed export su GPU, WebM, GIF/WebP, coda, momenti salienti |
+| `crates/hc-updater` | controllo release, verifica minisign + SHA-256, download |
+| `crates/hc-share` | condivisione LAN temporanea (tiny_http) e QR code |
+| `crates/hc-vault` | vault cifrato (XChaCha20-Poly1305 a blocchi, Argon2id) |
+| `crates/hc-plugins` | host di plugin WebAssembly in sandbox (wasmi) |
+| `apps/hyperclips` | core, tray, CLI, API locale |
+| `apps/hyperclips-studio` | UI egui |
+| `apps/hc-updater-helper` | applicazione degli aggiornamenti con rollback |
+| `tools/hc-bench`, `tools/hc-sign` | misure e diagnostica; chiavi e firma dei rilasci |
 
-I crate vengono creati nella fase in cui servono, per non avere codice vuoto.
-
+Scelte rispetto al piano iniziale: nessun FFmpeg (decodifica ed export usano
+Media Foundation e Direct3D 11, quindi niente DLL di terze parti e nessun problema
+di licenze dei codec); il player usa MF Media Engine; i plugin usano un interprete
+WebAssembly invece di un JIT, per un sandbox più semplice da verificare.
 ## Percorsi
 
 | | Installata | Portable (`portable.flag` accanto all'exe) |

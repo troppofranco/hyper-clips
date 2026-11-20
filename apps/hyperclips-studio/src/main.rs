@@ -8,6 +8,7 @@ mod core_link;
 mod editor_page;
 mod library_page;
 mod player;
+mod privacy_page;
 mod settings;
 mod settings_extra;
 mod share_ui;
