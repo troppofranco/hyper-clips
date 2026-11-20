@@ -2,7 +2,7 @@
 
 Formato: [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) · Versioni: [SemVer](https://semver.org/lang/it/).
 
-## [Unreleased]
+## [0.1.0]
 
 ### Fase 7 — Privacy Audit e rifinitura
 - **Privacy Audit** nello studio: connessioni TCP aperte in tempo reale da ogni processo di Hyper Clips (tabella di Windows via `GetExtendedTcpTable`), registro delle richieste in uscita, cartelle con dimensioni, spiegazione di cosa contengono i file, **cancellazione dei dati** selettiva (log, cache, indice, impostazioni, vault, clip) con conferma scritta.
