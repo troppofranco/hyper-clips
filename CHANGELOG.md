@@ -2,8 +2,16 @@
 
 Formato: [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) · Versioni: [SemVer](https://semver.org/lang/it/).
 
-## [0.1.0]
+## [Unreleased]
 
+### Interfaccia rinnovata
+- Nuovo layout dello studio: barra laterale con icone (Libreria, Momenti salienti, Editor, Vault, Impostazioni, Privacy), spazio su disco e stato del servizio; barra superiore con stato della cattura (replay attivo / registrazione / spento) e menu di azioni rapide, ricerca e "Condividi l'ultima".
+- Libreria: filtri a pillola (Tutto, Preferiti, Clip, Registrazioni, Screenshot, Per gioco), raggruppamento per data (Oggi, Ieri, Questa settimana…), schede che riempiono la finestra con etichetta del gioco, durata, tipo e "2 h fa · 00:11 · 6.5 MB"; stelle per i preferiti; stato vuoto con istruzioni.
+- Nuova pagina **Momenti salienti**.
+- Impostazioni divise in 13 categorie, ogni opzione con una spiegazione, interruttori al posto delle caselle, barra "Modifiche non salvate" con Salva/Annulla.
+- Nuova sezione **Personalizzazione**: tema con anteprime (scuro, chiaro, OLED, alto contrasto), colore principale (10 colori o personalizzato), dimensione delle schede, arrotondamento, layout compatto, etichette e dettagli delle schede, pagina iniziale, scala dell'interfaccia; anteprima dal vivo.
+
+## [0.1.0]
 ### Modifiche
 - Rimossa la firma minisign degli aggiornamenti (e lo strumento `hc-sign`): i pacchetti vengono verificati con lo SHA-256 pubblicato in `checksums.txt`. Non servono più secret su GitHub per pubblicare una release.
 

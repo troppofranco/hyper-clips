@@ -6,6 +6,7 @@
 mod app;
 mod core_link;
 mod editor_page;
+mod icons;
 mod library_page;
 mod player;
 mod privacy_page;
@@ -15,6 +16,7 @@ mod share_ui;
 mod theme;
 mod updates_ui;
 mod vault_page;
+mod widgets;
 
 use std::time::Duration;
 
@@ -66,8 +68,8 @@ fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_title(hc_core::APP_NAME)
-            .with_inner_size([1100.0, 700.0])
-            .with_min_inner_size([720.0, 480.0])
+            .with_inner_size([1280.0, 800.0])
+            .with_min_inner_size([900.0, 560.0])
             .with_icon(icon),
         ..Default::default()
     };

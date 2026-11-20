@@ -39,6 +39,7 @@ pub struct Config {
     pub share: Share,
     pub api: Api,
     pub plugins: Plugins,
+    pub appearance: Appearance,
     /// Per-game overrides, matched on the detected game name or executable.
     pub profiles: Vec<GameProfile>,
 }
@@ -52,6 +53,65 @@ pub enum Theme {
     Oled,
     /// Maximum contrast (accessibility).
     HighContrast,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum StartPage {
+    #[default]
+    Library,
+    Highlights,
+    Editor,
+}
+
+/// Look of the studio (Personalisation page).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Appearance {
+    /// Accent colour as `#rrggbb`.
+    pub accent: String,
+    /// Target width of a library card in points.
+    pub card_size: u32,
+    /// Tighter spacing everywhere.
+    pub compact: bool,
+    /// Corner rounding of cards and controls (0 = square).
+    pub corner_radius: u8,
+    pub show_game_badge: bool,
+    /// Time, length and size under each card.
+    pub show_details: bool,
+    pub start_page: StartPage,
+}
+
+impl Default for Appearance {
+    fn default() -> Self {
+        Self {
+            accent: "#e0403a".into(),
+            card_size: 300,
+            compact: false,
+            corner_radius: 10,
+            show_game_badge: true,
+            show_details: true,
+            start_page: StartPage::Library,
+        }
+    }
+}
+
+impl Appearance {
+    /// Accent as RGB; falls back to the default on a malformed value.
+    pub fn accent_rgb(&self) -> [u8; 3] {
+        parse_hex(&self.accent)
+            .or_else(|| parse_hex(&Self::default().accent))
+            .unwrap_or([224, 64, 58])
+    }
+}
+
+fn parse_hex(s: &str) -> Option<[u8; 3]> {
+    let h = s.trim().trim_start_matches('#');
+    if h.len() != 6 || !h.is_ascii() {
+        return None;
+    }
+    let b = |i: usize| u8::from_str_radix(&h[i..i + 2], 16).ok();
+    Some([b(0)?, b(2)?, b(4)?])
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -604,6 +664,12 @@ impl Config {
             self.api.port = Api::default().port;
         }
         self.profiles.retain(|p| !p.game.trim().is_empty());
+        let ap = &mut self.appearance;
+        ap.card_size = ap.card_size.clamp(180, 420);
+        ap.corner_radius = ap.corner_radius.min(18);
+        if parse_hex(&ap.accent).is_none() {
+            ap.accent = Appearance::default().accent;
+        }
     }
 
     /// The settings actually used for capture right now: the global ones,
@@ -737,6 +803,17 @@ mod tests {
         assert_eq!(cfg.effective(None, None, true).capture, cfg.capture);
         cfg.performance.low_impact = true;
         assert_eq!(cfg.effective(None, None, false).capture.fps, 30);
+    }
+
+    #[test]
+    fn accent_parsing() {
+        let mut a = Appearance {
+            accent: "#10b981".into(),
+            ..Default::default()
+        };
+        assert_eq!(a.accent_rgb(), [0x10, 0xb9, 0x81]);
+        a.accent = "nope".into();
+        assert_eq!(a.accent_rgb(), [224, 64, 58]);
     }
 
     #[test]
