@@ -21,6 +21,7 @@ hc-detect.workspace = true
 hc-encode.workspace = true
 hc-library.workspace = true
 hc-recorder.workspace = true
+hc-updater.workspace = true
 hc-hotkeys.workspace = true
 tracing.workspace = true
 

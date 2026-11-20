@@ -5,3 +5,5 @@ portable.flag
 *.key
 *.secret
 bench-*.csv
+*.password
+hyperclips.key

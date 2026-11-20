@@ -59,7 +59,7 @@ thread_local! {
     static APP: RefCell<Option<App>> = const { RefCell::new(None) };
 }
 
-pub fn run(background: bool) -> ExitCode {
+pub fn run(background: bool, health_file: Option<std::path::PathBuf>) -> ExitCode {
     let t0 = Instant::now();
     // SAFETY: called before any window exists.
     unsafe {
@@ -141,6 +141,10 @@ pub fn run(background: bool) -> ExitCode {
     unsafe {
         SetTimer(Some(hwnd), DETECT_TIMER_ID, DETECT_INTERVAL_MS, None);
     }
+    if let Some(h) = &health_file {
+        let _ = std::fs::write(h, b"ok");
+    }
+    crate::updates::start(&app.paths, &app.config, hwnd);
     if !background && let Err(e) = studio::open(&app.paths) {
         tracing::warn!(error = %e, "could not open studio");
     }
@@ -443,6 +447,25 @@ impl App {
     }
 }
 
+static PENDING_UPDATE: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+const WM_APP_UPDATE: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 4;
+
+/// Called from the update thread: wake the UI thread to show a toast.
+pub fn post_update_available(hwnd: isize, version: &str) {
+    if let Ok(mut p) = PENDING_UPDATE.lock() {
+        *p = Some(version.to_owned());
+    }
+    // SAFETY: PostMessageW is thread-safe.
+    unsafe {
+        let _ = windows::Win32::UI::WindowsAndMessaging::PostMessageW(
+            Some(HWND(hwnd as *mut _)),
+            WM_APP_UPDATE,
+            WPARAM(0),
+            LPARAM(0),
+        );
+    }
+}
+
 /// Run `f` with the app state if it is not already borrowed (re-entrancy guard).
 fn with_app<R>(f: impl FnOnce(&mut App) -> R) -> Option<R> {
     APP.with(|cell| match cell.try_borrow_mut() {
@@ -497,6 +520,16 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 unsafe {
                     let _ = DestroyWindow(hwnd);
                 }
+            }
+            LRESULT(0)
+        }
+        WM_APP_UPDATE => {
+            let v = PENDING_UPDATE.lock().ok().and_then(|mut p| p.take());
+            if let Some(v) = v {
+                with_app(|app| {
+                    let msg = app.i18n.tr_args("notify-update", &[("version", &v)]);
+                    app.tray.notify(hc_core::APP_NAME, &msg, false, false);
+                });
             }
             LRESULT(0)
         }

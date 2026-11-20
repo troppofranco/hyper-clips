@@ -10,6 +10,7 @@ mod library_page;
 mod player;
 mod settings;
 mod theme;
+mod updates_ui;
 
 use std::time::Duration;
 

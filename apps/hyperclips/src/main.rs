@@ -12,6 +12,7 @@ mod ipc_server;
 mod overlay;
 mod studio;
 mod tray;
+mod updates;
 
 use std::process::ExitCode;
 
@@ -25,6 +26,6 @@ fn main() -> ExitCode {
     let args = cli::Args::parse();
     match args.command() {
         Some(cmd) => cli::run(cmd),
-        None => core_app::run(args.background),
+        None => core_app::run(args.background, args.health_file),
     }
 }

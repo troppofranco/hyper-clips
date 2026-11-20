@@ -28,6 +28,7 @@ hc-editor.workspace = true
 hc-encode.workspace = true
 hc-hotkeys.workspace = true
 hc-library.workspace = true
+hc-updater.workspace = true
 windows-core.workspace = true
 tracing.workspace = true
 

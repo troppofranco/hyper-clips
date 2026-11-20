@@ -26,6 +26,7 @@ notify-recording-stopped = Registrazione salvata ({ $duration }, { $markers } ma
 notify-marker = Marker aggiunto
 notify-screenshot = Screenshot salvato
 notify-error = Errore: { $error }
+notify-update = È disponibile Hyper Clips { $version }. Apri l'app per installarlo.
 notify-hotkey-conflicts = Alcune hotkey non sono state registrate. Apri le impostazioni per correggerle.
 notify-already-running = Hyper Clips è già in esecuzione.
 
@@ -226,3 +227,16 @@ ed-queue = Coda di esportazione
 ed-queue-empty = Nessuna esportazione. Le esportazioni continuano anche se chiudi questa finestra.
 job-queued = In coda
 job-cancel = Annulla
+
+## Aggiornamenti
+upd-title = Aggiornamento software
+upd-check-now = Controlla ora
+upd-checking = Controllo su GitHub…
+upd-up-to-date = Hai già l'ultima versione.
+upd-error = Controllo aggiornamenti non riuscito: { $error }
+upd-available = È disponibile la versione { $version }
+upd-install = Installa ora
+upd-later = Più tardi
+upd-ignore = Salta questa versione
+upd-downloading = Download e verifica di { $version }…
+upd-privacy = Vengono contattati solo api.github.com e github.com, con uno User-Agent generico e senza identificativi. I pacchetti vengono verificati con firma e SHA-256 prima dell'installazione.

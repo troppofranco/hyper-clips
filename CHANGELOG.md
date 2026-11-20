@@ -4,6 +4,14 @@ Formato: [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) · Versioni: [
 
 ## [Unreleased]
 
+### Fase 5 — Aggiornamenti, installer, rilasci
+- `hc-updater`: controllo delle release su GitHub (`troppofranco/hyper-clips`, costanti in un solo punto), canali stabile e beta (SemVer), all'avvio, ogni N ore o mai; versioni ignorabili. User-Agent generico, nessun identificativo; ogni richiesta finisce in `logs\network.log`.
+- Verifica prima dell'installazione: firma **minisign** di `checksums.txt` con chiave pubblica incorporata (il *trusted comment* deve contenere la versione, per bloccare i downgrade), poi **SHA-256** del pacchetto.
+- `hc-updater-helper`: aspetta la chiusura dell'app, fa il backup dei file di programma, installa (Setup silenzioso o estrazione dello zip portable senza toccare `data\`), avvia la nuova versione con un controllo di salute e, se fallisce entro 30 s, **ripristina la versione precedente**. Rifiuta eseguibili non validi senza mostrare dialoghi di sistema.
+- Notifica dell'aggiornamento dal core; pannello "Aggiornamenti" nello studio (note di rilascio, installa, ignora).
+- Installer **Inno Setup** per utente (niente amministratore), italiano/inglese, modalità silenziosa, collegamenti opzionali, avvio automatico opzionale; il programma di disinstallazione chiede se eliminare i dati (predefinito: no). Zip **portable** con `portable.flag`.
+- `hc-sign` (keygen/firma) e workflow GitHub Actions `release.yml`: test, build, zip, installer, checksum firmati, note dal CHANGELOG, pre-release per i tag con trattino. Guida in `docs/RELEASING.md`.
+
 ### Fase 4 — Editor ed export
 - `hc-editor`: progetto non distruttivo (JSON) con segmenti (inizio, fine, velocità 0,25–4x), taglio al cursore, riordino, transizioni (stacco, dissolvenza incrociata, dissolvenza al nero), inquadratura (originale, 16:9, 9:16, 1:1, zoom, spostamento), overlay di testo con contorno (GDI, nessun font remoto) e di immagini, sottotitoli .srt importabili, tracce audio con volume e muto, esportazione mixata o separata.
 - Motore di export su GPU: decodifica Media Foundation (DXVA), composizione D3D11, stessi encoder hardware della cattura. Formati: **MP4** (H.264/HEVC/AV1 + AAC), **WebM** (AV1, muxer Matroska proprio; senza audio perché manca un encoder Opus locale), **GIF**, **WebP animato** (lossless).

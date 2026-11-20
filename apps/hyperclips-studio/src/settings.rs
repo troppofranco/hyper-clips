@@ -22,6 +22,7 @@ pub struct SettingsPage {
     message: Option<(bool, String)>,
     conflicts: Vec<HotkeyConflict>,
     cameras: Vec<String>,
+    update_ui: crate::updates_ui::UpdateUi,
 }
 
 /// Per-action validation result for the hotkey editor (empty = valid).
@@ -47,6 +48,7 @@ impl SettingsPage {
             message: None,
             conflicts: Vec::new(),
             cameras: hc_capture::webcam::list_cameras(),
+            update_ui: crate::updates_ui::UpdateUi::new(),
         }
     }
 
@@ -100,6 +102,14 @@ impl SettingsPage {
             self.capture(ui, i);
             self.hotkeys(ui, i, &problems);
             self.updates(ui, i);
+            let saved_cfg = self.saved.clone();
+            section(ui, &i.tr("upd-title"), |ui| {
+                if let Some(crate::updates_ui::UpdateAction::Ignore(v)) =
+                    self.update_ui.ui(ui, i, paths, &saved_cfg)
+                {
+                    self.draft.updates.ignored_versions.push(v);
+                }
+            });
         });
         saved
     }

@@ -19,6 +19,9 @@ pub struct Args {
     /// Start the core in the tray without opening the window (used by autostart).
     #[arg(long)]
     pub background: bool,
+    /// Written once the core is up (used by the updater's health check).
+    #[arg(long, hide = true)]
+    pub health_file: Option<std::path::PathBuf>,
     /// Save the Instant Replay buffer as a clip.
     #[arg(long, group = "cmd")]
     save_clip: bool,

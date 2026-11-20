@@ -18,6 +18,8 @@ allow = [
     "MIT-0",
     "Apache-2.0",
     "Apache-2.0 WITH LLVM-exception",
+    # Mozilla CA root list bundled by webpki-roots (used by the updater's TLS).
+    "CDLA-Permissive-2.0",
     "BSD-2-Clause",
     "BSD-3-Clause",
     "BSL-1.0",
