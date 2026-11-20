@@ -34,15 +34,135 @@ pub struct Config {
     pub notifications: Notifications,
     pub privacy: Privacy,
     pub updates: Updates,
+    pub performance: Performance,
+    pub highlights: Highlights,
+    pub share: Share,
+    pub api: Api,
+    pub plugins: Plugins,
+    /// Per-game overrides, matched on the detected game name or executable.
+    pub profiles: Vec<GameProfile>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "kebab-case")]
 pub enum Theme {
     Light,
     #[default]
     Dark,
     Oled,
+    /// Maximum contrast (accessibility).
+    HighContrast,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum BatteryPolicy {
+    /// Same settings on battery and on AC power.
+    Ignore,
+    /// Apply the low-impact limits while on battery.
+    #[default]
+    LowImpact,
+    /// Stop the replay buffer while on battery.
+    Pause,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct Performance {
+    /// Cap capture at 30 fps / 720p with a lower bitrate, and skip noise
+    /// suppression, to keep the impact on the game as low as possible.
+    pub low_impact: bool,
+    pub on_battery: BatteryPolicy,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Highlights {
+    /// Analyse saved clips locally and add markers on loud moments.
+    pub auto_detect: bool,
+    /// Required loudness jump over the background, in dB (lower = more).
+    pub margin_db: u32,
+}
+
+impl Default for Highlights {
+    fn default() -> Self {
+        Self {
+            auto_detect: true,
+            margin_db: 9,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Share {
+    /// Lifetime of a LAN share link, in minutes.
+    pub expire_minutes: u32,
+    /// Stop after this many complete downloads (0 = unlimited).
+    pub max_downloads: u32,
+}
+
+impl Default for Share {
+    fn default() -> Self {
+        Self {
+            expire_minutes: 15,
+            max_downloads: 0,
+        }
+    }
+}
+
+/// Local HTTP API on 127.0.0.1 (off by default, token protected).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Api {
+    pub enabled: bool,
+    pub port: u16,
+}
+
+impl Default for Api {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            port: 47_821,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct Plugins {
+    /// Off by default: plugins only run when explicitly enabled.
+    pub enabled: bool,
+    /// Plugin ids the user switched off.
+    pub disabled: Vec<String>,
+}
+
+/// Settings that override the global ones while a given game is detected.
+/// `None` keeps the global value.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct GameProfile {
+    /// Game name as detected, or executable name (case-insensitive).
+    pub game: String,
+    /// Do not keep a replay buffer for this game.
+    pub disable_replay: bool,
+    pub replay_seconds: Option<u32>,
+    pub fps: Option<u32>,
+    pub height: Option<u32>,
+    pub bitrate_kbps: Option<u32>,
+    pub codec: Option<Codec>,
+    pub capture_mode: Option<CaptureMode>,
+    pub microphone: Option<bool>,
+    pub separate_tracks: Option<bool>,
+}
+
+impl GameProfile {
+    pub fn matches(&self, game: &str, exe: Option<&str>) -> bool {
+        let want = self.game.trim();
+        !want.is_empty()
+            && (want.eq_ignore_ascii_case(game.trim())
+                || exe.is_some_and(|e| want.eq_ignore_ascii_case(e)))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -56,6 +176,10 @@ pub struct General {
     /// Custom clips folder; empty means the default for the install mode.
     pub clips_dir: Option<PathBuf>,
     pub log_level: LogLevel,
+    /// UI zoom factor (accessibility), 0.75..=2.0.
+    pub ui_scale: f32,
+    /// Disable UI animations.
+    pub reduce_motion: bool,
 }
 
 impl Default for General {
@@ -66,6 +190,8 @@ impl Default for General {
             start_with_windows: false,
             clips_dir: None,
             log_level: LogLevel::Info,
+            ui_scale: 1.0,
+            reduce_motion: false,
         }
     }
 }
@@ -468,6 +594,71 @@ impl Config {
         if self.general.language.trim().is_empty() {
             self.general.language = "auto".into();
         }
+        if !self.general.ui_scale.is_finite() {
+            self.general.ui_scale = 1.0;
+        }
+        self.general.ui_scale = self.general.ui_scale.clamp(0.75, 2.0);
+        self.highlights.margin_db = self.highlights.margin_db.clamp(3, 30);
+        self.share.expire_minutes = self.share.expire_minutes.clamp(1, 24 * 60);
+        if self.api.port < 1024 {
+            self.api.port = Api::default().port;
+        }
+        self.profiles.retain(|p| !p.game.trim().is_empty());
+    }
+
+    /// The settings actually used for capture right now: the global ones,
+    /// overridden by the matching game profile, then by the power policy.
+    pub fn effective(&self, game: Option<&str>, exe: Option<&str>, on_battery: bool) -> Config {
+        let mut c = self.clone();
+        if let Some(p) = game.and_then(|g| self.profiles.iter().find(|p| p.matches(g, exe))) {
+            let cap = &mut c.capture;
+            if p.disable_replay {
+                cap.replay_enabled = false;
+            }
+            if let Some(v) = p.replay_seconds {
+                cap.replay_seconds = v;
+            }
+            if let Some(v) = p.fps {
+                cap.fps = v;
+            }
+            if let Some(v) = p.height {
+                cap.height = v;
+            }
+            if let Some(v) = p.bitrate_kbps {
+                cap.bitrate_kbps = v;
+            }
+            if let Some(v) = p.codec {
+                cap.codec = v;
+            }
+            if let Some(v) = p.capture_mode {
+                cap.mode = v;
+            }
+            if let Some(v) = p.microphone {
+                c.audio.microphone = v;
+            }
+            if let Some(v) = p.separate_tracks {
+                c.audio.separate_tracks = v;
+            }
+        }
+        let battery = on_battery && self.performance.on_battery != BatteryPolicy::Ignore;
+        if battery && self.performance.on_battery == BatteryPolicy::Pause {
+            c.capture.replay_enabled = false;
+        }
+        if self.performance.low_impact
+            || (battery && self.performance.on_battery == BatteryPolicy::LowImpact)
+        {
+            let cap = &mut c.capture;
+            cap.fps = cap.fps.min(30);
+            cap.height = if cap.height == 0 {
+                720
+            } else {
+                cap.height.min(720)
+            };
+            cap.bitrate_kbps = (cap.bitrate_kbps / 2).clamp(2_000, 8_000);
+            c.audio.noise_suppression = false;
+        }
+        c.sanitize();
+        c
     }
 }
 
@@ -514,6 +705,38 @@ mod tests {
         cfg.save(&path).unwrap();
         assert_eq!(Config::load(&path).unwrap(), cfg);
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn profiles_and_power_policy() {
+        let mut cfg = Config::from_toml(
+            "[[profiles]]\ngame = \"Valorant\"\nfps = 144\nbitrate_kbps = 40000\n\
+             [[profiles]]\ngame = \"solitaire.exe\"\ndisable_replay = true\n",
+        )
+        .unwrap();
+        let e = cfg.effective(Some("valorant"), None, false);
+        assert_eq!((e.capture.fps, e.capture.bitrate_kbps), (144, 40_000));
+        assert!(
+            !cfg.effective(Some("Solitaire"), Some("Solitaire.EXE"), false)
+                .capture
+                .replay_enabled
+        );
+        assert_eq!(
+            cfg.effective(Some("Other"), None, false).capture,
+            cfg.capture
+        );
+        // Battery (default policy) limits the profile too.
+        let b = cfg.effective(Some("Valorant"), None, true);
+        assert_eq!(
+            (b.capture.fps, b.capture.height, b.capture.bitrate_kbps),
+            (30, 720, 8_000)
+        );
+        cfg.performance.on_battery = BatteryPolicy::Pause;
+        assert!(!cfg.effective(None, None, true).capture.replay_enabled);
+        cfg.performance.on_battery = BatteryPolicy::Ignore;
+        assert_eq!(cfg.effective(None, None, true).capture, cfg.capture);
+        cfg.performance.low_impact = true;
+        assert_eq!(cfg.effective(None, None, false).capture.fps, 30);
     }
 
     #[test]

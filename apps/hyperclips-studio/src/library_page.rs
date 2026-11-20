@@ -43,6 +43,8 @@ struct Detail {
     frame: Option<TextureHandle>,
     volume: f64,
     confirm_delete: bool,
+    /// Highlight detection running in the background.
+    highlights: Option<Receiver<Result<Vec<f64>, String>>>,
 }
 
 pub struct LibraryPage {
@@ -63,6 +65,8 @@ pub struct LibraryPage {
     scan: Option<Receiver<Result<ScanReport, String>>>,
     toast: Option<(String, Instant)>,
     edit_request: Option<(std::path::PathBuf, String)>,
+    vault_request: Option<(i64, std::path::PathBuf)>,
+    share: Option<crate::share_ui::ShareWindow>,
 }
 
 impl LibraryPage {
@@ -89,6 +93,8 @@ impl LibraryPage {
             scan: None,
             toast: None,
             edit_request: None,
+            vault_request: None,
+            share: None,
         };
         page.start_scan(paths, config);
         page
@@ -118,6 +124,17 @@ impl LibraryPage {
         if spawned.is_ok() {
             self.scan = Some(rx);
         }
+    }
+
+    /// A library item the user asked to move into the encrypted vault.
+    pub fn take_vault_request(&mut self) -> Option<(i64, std::path::PathBuf)> {
+        self.vault_request.take()
+    }
+
+    /// The player must release a file before it is moved or deleted.
+    pub fn close_detail(&mut self) {
+        self.detail = None;
+        self.dirty = true;
     }
 
     /// A clip the user asked to open in the editor.
@@ -198,7 +215,7 @@ impl LibraryPage {
                 .resizable(true)
                 .default_size(460.0)
                 .show(ui, |ui| {
-                    self.detail_ui(ui, i);
+                    self.detail_ui(ui, i, config);
                 });
         }
         egui::CentralPanel::default().show(ui, |ui| {
@@ -217,6 +234,11 @@ impl LibraryPage {
                 .auto_shrink(false)
                 .show(ui, |ui| self.gallery(ui));
         });
+        if let Some(w) = self.share.as_mut()
+            && !w.ui(ui.ctx(), i)
+        {
+            self.share = None; // dropping the share stops the server
+        }
         if let Some((msg, at)) = &self.toast {
             if at.elapsed() < Duration::from_secs(3) {
                 egui::Area::new(ui.scope_id().with("lib-toast"))
@@ -427,10 +449,11 @@ impl LibraryPage {
             frame: None,
             volume: 1.0,
             confirm_delete: false,
+            highlights: None,
         });
     }
 
-    fn detail_ui(&mut self, ui: &mut egui::Ui, i: &Localizer) {
+    fn detail_ui(&mut self, ui: &mut egui::Ui, i: &Localizer, config: &Config) {
         let Some(d) = self.detail.as_mut() else {
             return;
         };
@@ -544,6 +567,36 @@ impl LibraryPage {
                 p.toggle();
             }
         }
+        if let Some(rx) = &d.highlights {
+            match rx.try_recv() {
+                Ok(Ok(found)) => {
+                    d.highlights = None;
+                    if let Some(l) = self.lib.as_mut() {
+                        let added = l.add_highlights(d.id, &found).unwrap_or(0);
+                        d.markers = l.markers(d.id).unwrap_or_default();
+                        if let Some(it) = l.get(d.id).ok().flatten() {
+                            d.tags = it.tags.join(", ");
+                        }
+                        self.toast = Some((
+                            i.tr_args("lib-highlights-found", &[("count", &added.to_string())]),
+                            Instant::now(),
+                        ));
+                        self.dirty = true;
+                    }
+                }
+                Ok(Err(e)) => {
+                    d.highlights = None;
+                    self.toast = Some((e, Instant::now()));
+                }
+                Err(_) => {
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label(i.tr("lib-highlights-running"));
+                    });
+                    ui.ctx().request_repaint_after(Duration::from_millis(200));
+                }
+            }
+        }
         if !d.markers.is_empty() {
             ui.horizontal_wrapped(|ui| {
                 ui.label(i.tr("lib-markers"));
@@ -622,6 +675,39 @@ impl LibraryPage {
                     p.pause();
                 }
                 self.edit_request = Some((item.path.clone(), item.title.clone()));
+            }
+            if item.kind != Kind::Screenshot
+                && d.highlights.is_none()
+                && ui.button(i.tr("lib-find-highlights")).clicked()
+            {
+                let (tx, rx) = channel();
+                let (path, dur) = (item.path.clone(), item.duration_ms);
+                let params = hc_editor::highlight::Params {
+                    margin_db: config.highlights.margin_db as f32,
+                    ..Default::default()
+                };
+                let _ = std::thread::Builder::new()
+                    .name("highlights".into())
+                    .spawn(move || {
+                        hc_encode::mf::init_thread();
+                        let r = hc_editor::highlight::detect_file(&path, dur, &params)
+                            .map(|v| v.iter().map(|h| h.at_secs).collect())
+                            .map_err(|e| e.to_string());
+                        let _ = tx.send(r);
+                    });
+                d.highlights = Some(rx);
+            }
+            if ui.button(i.tr("lib-share-lan")).clicked() {
+                match crate::share_ui::ShareWindow::start(&item.path, &item.title, &config.share) {
+                    Ok(w) => self.share = Some(w),
+                    Err(e) => toast = Some(e),
+                }
+            }
+            if ui.button(i.tr("lib-move-to-vault")).clicked() {
+                if let Some(p) = &d.player {
+                    p.pause();
+                }
+                self.vault_request = Some((item.id, item.path.clone()));
             }
             if ui.button(i.tr("lib-open-folder")).clicked() {
                 let _ = fsops::reveal_in_explorer(&item.path);

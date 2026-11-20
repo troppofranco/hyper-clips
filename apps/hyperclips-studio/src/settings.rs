@@ -23,6 +23,7 @@ pub struct SettingsPage {
     conflicts: Vec<HotkeyConflict>,
     cameras: Vec<String>,
     update_ui: crate::updates_ui::UpdateUi,
+    extra: crate::settings_extra::ExtraState,
 }
 
 /// Per-action validation result for the hotkey editor (empty = valid).
@@ -41,7 +42,7 @@ pub fn hotkey_problems(hk: &Hotkeys) -> Vec<(&'static str, String)> {
 }
 
 impl SettingsPage {
-    pub fn new(config: Config) -> Self {
+    pub fn new(config: Config, paths: &AppPaths) -> Self {
         Self {
             saved: config.clone(),
             draft: config,
@@ -49,6 +50,7 @@ impl SettingsPage {
             conflicts: Vec::new(),
             cameras: hc_capture::webcam::list_cameras(),
             update_ui: crate::updates_ui::UpdateUi::new(),
+            extra: crate::settings_extra::ExtraState::new(paths),
         }
     }
 
@@ -101,6 +103,14 @@ impl SettingsPage {
             self.general(ui, i, paths);
             self.capture(ui, i);
             self.hotkeys(ui, i, &problems);
+            if let Some(crate::settings_extra::ExtraOutcome::Restored(cfg)) =
+                crate::settings_extra::ui(&mut self.extra, &mut self.draft, ui, i, paths)
+            {
+                self.saved = (*cfg).clone();
+                self.draft = *cfg;
+                let _ = core.request(&Request::ReloadConfig);
+                saved = Some(self.saved.clone());
+            }
             self.updates(ui, i);
             let saved_cfg = self.saved.clone();
             section(ui, &i.tr("upd-title"), |ui| {
@@ -161,6 +171,11 @@ impl SettingsPage {
                         ui.radio_value(&mut g.theme, Theme::Light, i.tr("theme-light"));
                         ui.radio_value(&mut g.theme, Theme::Dark, i.tr("theme-dark"));
                         ui.radio_value(&mut g.theme, Theme::Oled, i.tr("theme-oled"));
+                        ui.radio_value(
+                            &mut g.theme,
+                            Theme::HighContrast,
+                            i.tr("theme-high-contrast"),
+                        );
                     });
                     ui.end_row();
 
@@ -528,7 +543,7 @@ impl SettingsPage {
     }
 }
 
-fn section(ui: &mut egui::Ui, title: &str, body: impl FnOnce(&mut egui::Ui)) {
+pub fn section(ui: &mut egui::Ui, title: &str, body: impl FnOnce(&mut egui::Ui)) {
     ui.add_space(8.0);
     ui.strong(title);
     ui.add_space(4.0);

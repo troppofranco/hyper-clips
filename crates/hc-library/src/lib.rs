@@ -69,6 +69,9 @@ pub struct NewItem {
     pub markers: Vec<f64>,
 }
 
+/// Tag added to items with automatically detected highlights.
+pub const HIGHLIGHT_TAG: &str = "highlight";
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Item {
     pub id: i64,
@@ -455,6 +458,32 @@ impl Library {
         Ok(())
     }
 
+    /// Merge automatically detected highlight positions into the markers
+    /// (skipping ones within 1 s of an existing marker) and tag the item
+    /// "highlight". Returns how many markers were added.
+    pub fn add_highlights(&mut self, id: i64, secs: &[f64]) -> Result<usize> {
+        let mut markers = self.markers(id)?;
+        let before = markers.len();
+        for &s in secs {
+            if markers.iter().all(|m| (m - s).abs() >= 1.0) {
+                markers.push(s);
+            }
+        }
+        let added = markers.len() - before;
+        if added > 0 {
+            markers.sort_by(f64::total_cmp);
+            self.set_markers(id, &markers)?;
+            if let Some(item) = self.get(id)? {
+                let mut tags = item.tags;
+                if !tags.iter().any(|t| t.eq_ignore_ascii_case(HIGHLIGHT_TAG)) {
+                    tags.push(HIGHLIGHT_TAG.into());
+                    self.set_tags(id, &tags)?;
+                }
+            }
+        }
+        Ok(added)
+    }
+
     pub fn markers(&self, id: i64) -> Result<Vec<f64>> {
         let mut st = self
             .conn
@@ -772,6 +801,21 @@ mod tests {
         it.markers = vec![1.5, 12.25];
         let id = lib.upsert(&it).unwrap();
         assert_eq!(lib.markers(id).unwrap(), vec![1.5, 12.25]);
+    }
+
+    #[test]
+    fn highlights_merge_into_markers() {
+        let mut lib = Library::open_in_memory().unwrap();
+        let mut it = item(r"C:\c\h.mp4", "CS2", 1, 1, 1);
+        it.markers = vec![10.0];
+        let id = lib.upsert(&it).unwrap();
+        assert_eq!(lib.add_highlights(id, &[10.4, 3.0, 30.0]).unwrap(), 2);
+        assert_eq!(lib.markers(id).unwrap(), vec![3.0, 10.0, 30.0]);
+        assert_eq!(
+            lib.get(id).unwrap().unwrap().tags,
+            vec![HIGHLIGHT_TAG.to_owned()]
+        );
+        assert_eq!(lib.add_highlights(id, &[3.2]).unwrap(), 0);
     }
 
     fn tmp(tag: &str) -> PathBuf {

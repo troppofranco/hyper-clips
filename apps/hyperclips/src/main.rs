@@ -4,6 +4,7 @@
 
 #![windows_subsystem = "windows"]
 
+mod api;
 mod capture;
 mod cli;
 mod core_app;

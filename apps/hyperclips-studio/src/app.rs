@@ -14,6 +14,7 @@ use crate::theme;
 enum Page {
     Library,
     Editor,
+    Vault,
     Settings,
     Privacy,
 }
@@ -25,12 +26,13 @@ pub struct StudioApp {
     settings: SettingsPage,
     library: LibraryPage,
     editor: EditorPage,
+    vault: crate::vault_page::VaultPage,
     core: CoreLink,
 }
 
 impl StudioApp {
     pub fn new(cc: &eframe::CreationContext<'_>, paths: AppPaths, config: Config) -> Self {
-        theme::apply(&cc.egui_ctx, config.general.theme);
+        theme::apply(&cc.egui_ctx, &config.general);
         let i18n = Localizer::new(&config.general.language, Some(&paths.exe_dir));
         Self {
             core: CoreLink::start(cc.egui_ctx.clone()),
@@ -43,7 +45,15 @@ impl StudioApp {
                     .clone()
                     .unwrap_or_else(|| paths.default_clips_dir.clone()),
             ),
-            settings: SettingsPage::new(config),
+            vault: crate::vault_page::VaultPage::new(
+                &paths,
+                config
+                    .general
+                    .clips_dir
+                    .clone()
+                    .unwrap_or_else(|| paths.default_clips_dir.clone()),
+            ),
+            settings: SettingsPage::new(config, &paths),
             page: Page::Library,
             i18n,
             paths,
@@ -57,6 +67,7 @@ impl StudioApp {
         for (page, key) in [
             (Page::Library, "nav-library"),
             (Page::Editor, "nav-editor"),
+            (Page::Vault, "nav-vault"),
             (Page::Settings, "nav-settings"),
             (Page::Privacy, "nav-privacy"),
         ] {
@@ -131,12 +142,18 @@ impl eframe::App for StudioApp {
                     self.editor.add_clip(&path, &title);
                     self.page = Page::Editor;
                 }
+                if let Some((id, path)) = self.library.take_vault_request() {
+                    self.library.close_detail();
+                    self.vault.request_add(id, path);
+                    self.page = Page::Vault;
+                }
             }
             Page::Editor => self.editor.ui(ui, &self.i18n),
+            Page::Vault => self.vault.ui(ui, &self.i18n),
             Page::Settings => {
                 let outcome = self.settings.ui(ui, &self.i18n, &self.paths, &self.core);
                 if let Some(saved) = outcome {
-                    theme::apply(ui.ctx(), saved.general.theme);
+                    theme::apply(ui.ctx(), &saved.general);
                     self.i18n = Localizer::new(&saved.general.language, Some(&self.paths.exe_dir));
                 }
             }

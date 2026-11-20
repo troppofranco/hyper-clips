@@ -4,6 +4,19 @@ Formato: [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) · Versioni: [
 
 ## [Unreleased]
 
+### Fase 6 — Funzioni extra
+- **Momenti salienti locali**: analisi dell'audio della clip (sonorità a breve termine contro il fondo mobile), marker automatici con tag `highlight` dopo ogni salvataggio, pulsante "Trova momenti salienti" e `--highlights <id>`. Nessun modello, nessuna rete.
+- **Condivisione in rete locale con QR** (`hc-share`): link con token casuale a 128 bit, solo LAN, scadenza e limite di download, pagina con player e supporto Range per il seek dal telefono. Spenta finché non viene avviata da una clip; traffico HTTP non cifrato (dichiarato nell'interfaccia).
+- **Vault cifrato** (`hc-vault`): XChaCha20-Poly1305 a blocchi con rilevamento di troncamenti e riordini, chiave principale protetta da Argon2id, indice cifrato (i nomi dei file non sono leggibili), cambio password senza ricifrare i file. "Sposta nel vault" dalla libreria, apertura ed estrazione.
+- **Profili per gioco**: fps, risoluzione, bitrate, codec, durata del replay, modalità di cattura, microfono e tracce separate per singolo gioco; replay disattivabile per gioco.
+- **Modalità a basso impatto** e **politica a batteria** (basso impatto, sospensione del replay o nessuna modifica); la cattura si riavvia solo fuori dalle registrazioni.
+- **API HTTP locale** (spenta di default): solo 127.0.0.1, token bearer, rifiuto delle richieste dai browser (`Origin`/`Host`). Vedi `docs/API.md`.
+- **Plugin WebAssembly** (`hc-plugins`, spenti di default): interprete wasmi in sandbox senza I/O, limiti di CPU e memoria, permessi `tags` e `notify`.
+- **Backup e ripristino delle impostazioni** (studio e CLI).
+- **Accessibilità**: tema ad alto contrasto, scala dell'interfaccia, riduzione delle animazioni.
+- CLI: `--export <id> --preset <nome>` ora accoda davvero l'export; l'output della CLI si può reindirizzare su file.
+- Correzione: al cambio lingua il core ricaricava ancora la lingua precedente.
+
 ### Fase 5 — Aggiornamenti, installer, rilasci
 - `hc-updater`: controllo delle release su GitHub (`troppofranco/hyper-clips`, costanti in un solo punto), canali stabile e beta (SemVer), all'avvio, ogni N ore o mai; versioni ignorabili. User-Agent generico, nessun identificativo; ogni richiesta finisce in `logs\network.log`.
 - Verifica prima dell'installazione: firma **minisign** di `checksums.txt` con chiave pubblica incorporata (il *trusted comment* deve contenere la versione, per bloccare i downgrade), poi **SHA-256** del pacchetto.

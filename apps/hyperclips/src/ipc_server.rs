@@ -29,7 +29,7 @@ pub struct IpcServer {
 
 /// Window handle that may cross threads (only used with PostMessageW).
 #[derive(Clone, Copy)]
-struct SendHwnd(isize);
+pub struct SendHwnd(pub isize);
 
 impl SendHwnd {
     fn post(self, msg: u32) -> bool {
@@ -106,7 +106,7 @@ fn serve_client(mut stream: PipeStream, hwnd: SendHwnd, to_main: &Sender<Envelop
     }
 }
 
-fn forward(request: Request, hwnd: SendHwnd, to_main: &Sender<Envelope>) -> Response {
+pub fn forward(request: Request, hwnd: SendHwnd, to_main: &Sender<Envelope>) -> Response {
     let (reply, rx) = bounded(1);
     if to_main.send(Envelope { request, reply }).is_err() || !hwnd.post(WM_APP_IPC) {
         return Response::Error("core is shutting down".into());

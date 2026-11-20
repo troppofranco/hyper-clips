@@ -43,6 +43,9 @@ const INSTANCE_MUTEX: &str = "HyperClips.Core";
 struct App {
     paths: AppPaths,
     config: Config,
+    /// config with the game profile and power policy applied.
+    effective: Config,
+    on_battery: bool,
     i18n: Localizer,
     tray: Tray,
     hotkeys: Registrar,
@@ -53,6 +56,9 @@ struct App {
     capture: CaptureCtl,
     overlay: Option<crate::overlay::Overlay>,
     indexer: crate::indexer::Indexer,
+    api: Option<crate::api::Api>,
+    api_tx: crossbeam_channel::Sender<Envelope>,
+    hwnd: isize,
 }
 
 thread_local! {
@@ -98,6 +104,7 @@ pub fn run(background: bool, health_file: Option<std::path::PathBuf>) -> ExitCod
         Err(e) => return fatal(&format!("cannot create window: {e}")),
     };
     let (ipc_tx, ipc_rx) = unbounded();
+    let api_tx = ipc_tx.clone();
     let mut ipc = match IpcServer::start(hwnd, ipc_tx) {
         Ok(s) => Some(s),
         Err(e) => {
@@ -114,17 +121,27 @@ pub fn run(background: bool, health_file: Option<std::path::PathBuf>) -> ExitCod
         ipc_rx,
         started: t0,
         capture: CaptureCtl::new(hwnd, &paths),
-        indexer: crate::indexer::Indexer::start(&paths),
+        indexer: crate::indexer::Indexer::start(&paths, {
+            let h = hwnd.0 as isize;
+            Box::new(move |text| post_plugin_notice(h, text))
+        }),
+        api: None,
+        api_tx,
+        hwnd: hwnd.0 as isize,
         overlay: crate::overlay::Overlay::new()
             .inspect_err(|e| tracing::warn!(error = %e, "in-game overlay unavailable"))
             .ok(),
         // SAFETY: constant string.
         taskbar_created: unsafe { RegisterWindowMessageW(w!("TaskbarCreated")) },
         paths,
+        effective: config.clone(),
+        on_battery: sys::on_battery(),
         config,
         i18n,
     };
+    app.effective = app.compute_effective();
     app.apply_hotkeys();
+    app.sync_api();
     let tip = app.tooltip();
     app.tray.add(&tip);
     if !app.conflicts.is_empty() {
@@ -135,8 +152,9 @@ pub fn run(background: bool, health_file: Option<std::path::PathBuf>) -> ExitCod
         init_ms = t0.elapsed().as_millis() as u64,
         "tray ready"
     );
-    app.capture.tick(&app.config);
-    app.capture.sync(&app.config);
+    app.capture.tick(&app.effective);
+    app.refresh_effective();
+    app.capture.sync(&app.effective);
     // SAFETY: timer owned by our window, killed on destroy.
     unsafe {
         SetTimer(Some(hwnd), DETECT_TIMER_ID, DETECT_INTERVAL_MS, None);
@@ -212,8 +230,60 @@ impl App {
         }
     }
 
+    /// Start, restart or stop the local HTTP API to match the settings.
+    fn sync_api(&mut self) {
+        let want = self.config.api.enabled.then_some(self.config.api.port);
+        if self.api.as_ref().map(|a| a.port) == want {
+            return;
+        }
+        self.api = None;
+        if let Some(port) = want {
+            match crate::api::Api::start(
+                port,
+                &self.paths.data_dir,
+                self.paths.library_db(),
+                self.hwnd,
+                self.api_tx.clone(),
+            ) {
+                Ok(a) => self.api = Some(a),
+                Err(e) => tracing::warn!(error = %e, port, "local API unavailable"),
+            }
+        }
+    }
+
+    fn compute_effective(&self) -> Config {
+        let g = self.capture.game.as_ref();
+        self.config.effective(
+            g.map(|g| g.name.as_str()),
+            g.map(|g| g.exe.as_str()),
+            self.on_battery,
+        )
+    }
+
+    /// Re-evaluate the game profile / power policy; restart capture when the
+    /// resulting settings differ (never in the middle of a recording).
+    fn refresh_effective(&mut self) {
+        let new = self.compute_effective();
+        if new == self.effective {
+            return;
+        }
+        let changed = new.capture != self.effective.capture || new.audio != self.effective.audio;
+        self.effective = new;
+        if changed && !self.capture.is_recording() {
+            tracing::info!(
+                battery = self.on_battery,
+                fps = self.effective.capture.fps,
+                replay = self.effective.capture.replay_enabled,
+                "game profile / power settings changed; restarting capture"
+            );
+            self.capture.stop();
+            self.capture.sync(&self.effective);
+            self.tray.set_tooltip(&self.tooltip());
+        }
+    }
+
     fn tooltip(&self) -> String {
-        let state = if self.config.capture.replay_enabled {
+        let state = if self.effective.capture.replay_enabled {
             "state-on"
         } else {
             "state-off"
@@ -266,18 +336,18 @@ impl App {
                 Err(e) => Response::Error(e),
             },
             Action::SaveClip => {
-                let r = self.capture.save_clip(&self.config, &self.paths);
+                let r = self.capture.save_clip(&self.effective, &self.paths);
                 self.action_result(action, r)
             }
             Action::ToggleRecording => {
                 let r = self
                     .capture
-                    .toggle_recording(&self.config, &self.paths)
+                    .toggle_recording(&self.effective, &self.paths)
                     .map(|_| ());
                 self.action_result(action, r)
             }
             Action::Screenshot => {
-                let r = self.capture.screenshot(&self.config, &self.paths);
+                let r = self.capture.screenshot(&self.effective, &self.paths);
                 self.action_result(action, r)
             }
             Action::AddMarker => {
@@ -313,6 +383,16 @@ impl App {
                     path: path.clone(),
                     game: self.capture.game.as_ref().map(|g| g.name.clone()),
                     limit_bytes: self.config.library.limit_bytes(),
+                    highlights_margin_db: self
+                        .config
+                        .highlights
+                        .auto_detect
+                        .then_some(self.config.highlights.margin_db),
+                    plugins: self
+                        .config
+                        .plugins
+                        .enabled
+                        .then(|| self.config.plugins.disabled.clone()),
                 });
             }
             match ev {
@@ -359,7 +439,7 @@ impl App {
                     self.toast(&msg, false);
                     self.tray.set_tooltip(&self.tooltip());
                     // Free capture resources if replay is off.
-                    self.capture.sync(&self.config);
+                    self.capture.sync(&self.effective);
                 }
                 Event::MarkerAdded { .. } => self.toast(&self.i18n.tr("notify-marker"), false),
                 Event::ScreenshotSaved { path } => {
@@ -379,26 +459,28 @@ impl App {
             Ok(cfg) => {
                 let lang_changed = cfg.general.language != self.config.general.language;
                 if lang_changed {
-                    self.i18n =
-                        Localizer::new(&self.config.general.language, Some(&self.paths.exe_dir));
+                    self.i18n = Localizer::new(&cfg.general.language, Some(&self.paths.exe_dir));
                 }
-                let capture_changed =
-                    cfg.capture != self.config.capture || cfg.audio != self.config.audio;
-                let only_duration = capture_changed && {
-                    let mut a = cfg.capture.clone();
-                    a.replay_seconds = self.config.capture.replay_seconds;
-                    a == self.config.capture && cfg.audio == self.config.audio
-                };
                 self.config = cfg;
+                let next = self.compute_effective();
+                let old = std::mem::replace(&mut self.effective, next);
+                let new = &self.effective;
+                let capture_changed = new.capture != old.capture || new.audio != old.audio;
+                let only_duration = capture_changed && {
+                    let mut a = new.capture.clone();
+                    a.replay_seconds = old.capture.replay_seconds;
+                    a == old.capture && new.audio == old.audio
+                };
                 apply_system_settings(&self.paths, &self.config);
                 self.apply_hotkeys();
+                self.sync_api();
                 if only_duration {
                     self.capture
-                        .set_replay_seconds(self.config.capture.replay_seconds);
+                        .set_replay_seconds(self.effective.capture.replay_seconds);
                 } else if capture_changed && !self.capture.is_recording() {
                     self.capture.stop();
                 }
-                self.capture.sync(&self.config);
+                self.capture.sync(&self.effective);
                 self.tray.set_tooltip(&self.tooltip());
                 tracing::info!("config reloaded");
                 Response::Reloaded {
@@ -417,7 +499,7 @@ impl App {
             pid: std::process::id(),
             uptime_secs: self.started.elapsed().as_secs(),
             recording: self.capture.is_recording(),
-            replay_active: self.capture.is_running() && self.config.capture.replay_enabled,
+            replay_active: self.capture.is_running() && self.effective.capture.replay_enabled,
             working_set_bytes: mem.working_set,
             private_bytes: mem.private_bytes,
             buffer_bytes: self.capture.buffer_bytes() as u64,
@@ -460,6 +542,25 @@ pub fn post_update_available(hwnd: isize, version: &str) {
         let _ = windows::Win32::UI::WindowsAndMessaging::PostMessageW(
             Some(HWND(hwnd as *mut _)),
             WM_APP_UPDATE,
+            WPARAM(0),
+            LPARAM(0),
+        );
+    }
+}
+
+static PLUGIN_NOTICES: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+const WM_APP_PLUGIN: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 5;
+
+/// Called from the indexer thread when a plugin asks for a notification.
+fn post_plugin_notice(hwnd: isize, text: String) {
+    if let Ok(mut q) = PLUGIN_NOTICES.lock() {
+        q.push(text);
+    }
+    // SAFETY: PostMessageW is thread-safe.
+    unsafe {
+        let _ = windows::Win32::UI::WindowsAndMessaging::PostMessageW(
+            Some(HWND(hwnd as *mut _)),
+            WM_APP_PLUGIN,
             WPARAM(0),
             LPARAM(0),
         );
@@ -533,12 +634,28 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             }
             LRESULT(0)
         }
+        WM_APP_PLUGIN => {
+            let notes = PLUGIN_NOTICES
+                .lock()
+                .map(|mut q| std::mem::take(&mut *q))
+                .unwrap_or_default();
+            with_app(|app| {
+                for n in notes {
+                    app.toast(&n, false);
+                }
+            });
+            LRESULT(0)
+        }
         WM_APP_CAPTURE => {
             with_app(App::on_capture_events);
             LRESULT(0)
         }
         WM_TIMER if wparam.0 == DETECT_TIMER_ID => {
-            with_app(|app| app.capture.tick(&app.config));
+            with_app(|app| {
+                app.capture.tick(&app.effective);
+                app.on_battery = sys::on_battery();
+                app.refresh_effective();
+            });
             LRESULT(0)
         }
         WM_DESTROY => {

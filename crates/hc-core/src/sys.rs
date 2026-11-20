@@ -326,6 +326,15 @@ pub fn focus_process_window(pid: u32) -> bool {
     }
 }
 
+/// True when the PC runs on battery (laptops); false on AC or without battery.
+pub fn on_battery() -> bool {
+    let mut s = windows::Win32::System::Power::SYSTEM_POWER_STATUS::default();
+    // SAFETY: plain out-parameter query.
+    unsafe { windows::Win32::System::Power::GetSystemPowerStatus(&mut s) }.is_ok()
+        && s.ACLineStatus == 0
+        && s.BatteryFlag != 128
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

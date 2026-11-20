@@ -18,11 +18,16 @@ crossbeam-channel.workspace = true
 hc-capture.workspace = true
 hc-core.workspace = true
 hc-detect.workspace = true
+hc-editor.workspace = true
 hc-encode.workspace = true
 hc-library.workspace = true
+hc-plugins.workspace = true
 hc-recorder.workspace = true
 hc-updater.workspace = true
 hc-hotkeys.workspace = true
+getrandom.workspace = true
+serde_json.workspace = true
+tiny_http.workspace = true
 tracing.workspace = true
 
 [dependencies.windows]

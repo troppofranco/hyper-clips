@@ -3,6 +3,7 @@
 //! This crate must stay lightweight: it is linked into the always-running
 //! core process, so no GUI, media or network dependencies belong here.
 
+pub mod backup;
 pub mod brand;
 pub mod config;
 pub mod i18n;

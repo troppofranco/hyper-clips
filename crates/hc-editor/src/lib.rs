@@ -6,6 +6,7 @@
 
 pub mod anim;
 pub mod decode;
+pub mod highlight;
 pub mod project;
 pub mod queue;
 pub mod render;

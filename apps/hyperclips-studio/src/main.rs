@@ -9,8 +9,11 @@ mod editor_page;
 mod library_page;
 mod player;
 mod settings;
+mod settings_extra;
+mod share_ui;
 mod theme;
 mod updates_ui;
+mod vault_page;
 
 use std::time::Duration;
 
