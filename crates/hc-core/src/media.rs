@@ -12,6 +12,7 @@ pub const TIMEBASE: i64 = 10_000_000;
 pub enum VideoCodec {
     H264,
     Hevc,
+    Av1,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,7 +21,8 @@ pub struct VideoInfo {
     pub width: u32,
     pub height: u32,
     pub fps: u32,
-    /// Parameter sets without start codes: H.264 = [SPS, PPS], HEVC = [VPS, SPS, PPS].
+    /// Parameter sets without start codes: H.264 = [SPS, PPS], HEVC = [VPS, SPS, PPS],
+    /// AV1 = [sequence header OBU].
     pub param_sets: Vec<Vec<u8>>,
 }
 
@@ -28,8 +30,24 @@ pub struct VideoInfo {
 pub enum AudioRole {
     /// System + microphone, the track players pick by default.
     Mix,
+    /// Everything except the game (or the whole system without a game).
     System,
     Microphone,
+    Game,
+    Chat,
+}
+
+impl AudioRole {
+    /// Track name written in the MP4 handler box (shown by players/editors).
+    pub fn label(self) -> &'static str {
+        match self {
+            AudioRole::Mix => "Mix",
+            AudioRole::System => "System",
+            AudioRole::Microphone => "Microphone",
+            AudioRole::Game => "Game",
+            AudioRole::Chat => "Chat",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -35,7 +35,7 @@ Framing: `u32` LE + `postcard`. Configurazione condivisa via `config.toml`
 | `apps/hyperclips` | core + tray + CLI | Fase 1 ✅ |
 | `apps/hyperclips-studio` | UI egui | Fase 1 (scheletro) ✅ |
 | `tools/hc-bench` | misure RAM/CPU, spike | Fase 1 ✅ |
-| `hc-capture` | Desktop Duplication, NV12 su GPU, WASAPI, mixer, screenshot WIC | Fase 2 ✅ |
+| `hc-capture` | Desktop Duplication (anche HDR), WGC finestra, regione, compositor D3D11 (cursore, tone-map, webcam), WASAPI + process loopback, DSP microfono, screenshot PNG/JPG/WebP | Fase 2 ✅ |
 | `hc-encode` | encoder MF (HW/SW), AAC, muxer MP4, probe | Fase 2 ✅ |
 | `hc-buffer` | ring buffer di pacchetti codificati | Fase 2 ✅ |
 | `hc-recorder` | thread video/audio/sink, clip, registrazione, marker | Fase 2 ✅ |
@@ -94,8 +94,12 @@ né date).
 
 ## Limiti noti (aggiornati)
 
-- **Fase 2 consegnata parzialmente.** Funzionano Instant Replay in RAM, clip, registrazione, marker, screenshot PNG/JPG, H.264/HEVC hardware con fallback software, audio di sistema e microfono con mix e stem, rilevamento del gioco e del suo monitor. **Restano da fare:** cattura per finestra o regione (WGC), audio per-processo (gioco/Discord separati), push-to-talk, noise gate e soppressione rumore, buffer su disco, HDR (oggi l'HDR viene catturato come SDR convertito da DXGI), cursore nel video (Desktop Duplication non lo compone), overlay in-game, webcam, AV1, backend NVENC/AMF nativi, screenshot WebP.
-- **RAM del core in cattura:** 81 MB di working set al netto del buffer, sopra l'obiettivo dei 60 MB (dettagli in BENCHMARKS).
+- **Fase 2 completata**, con queste verifiche ancora mancanti su hardware reale: HDR (shader di tone-mapping testato in unit test, ma non su un monitor HDR), webcam (nessuna camera testata), overlay in-game (non verificato visivamente sopra un gioco), push-to-talk, noise gate e RNNoise (testati in unit test, non con un microfono reale). Backend NVENC/AMF nativi rimandati alla Fase 7 come ottimizzazione di RAM: Media Foundation copre già NVIDIA, AMD e Intel.
+- **RAM del core in cattura:** 83–117 MB di working set al netto del buffer, sopra l'obiettivo dei 60 MB; le tracce audio separate pesano circa 29 MB (dettagli in BENCHMARKS).
+- **Overlay in-game:** escluso da ogni cattura (`WDA_EXCLUDEFROMCAPTURE`); nei giochi in fullscreen esclusivo "vero" non è visibile e si ricade sul toast di Windows.
+- **Audio per processo:** richiede Windows 10 2004+; altrimenti una sola traccia di sistema. Se un gioco riproduce l'audio da un processo esterno al suo albero, quel suono finisce in "Other".
+- **Cattura finestra (WGC) su Windows 10:** bordo giallo non rimovibile (su Windows 11 viene nascosto).
+- **HDR:** con un desktop HDR la cattura avviene in FP16 e viene convertita in SDR (bianco di riferimento configurabile). Non c'è ancora uscita HDR10.
 - **Win10 22H2:** WGC mostra un bordo giallo non rimovibile → Desktop Duplication per monitor e gioco fullscreen.
 - **Fullscreen esclusivo "vero":** possibili frame neri; niente hook (rischio anti-cheat) → suggerire il borderless.
 - **Hotkey solo tasto** (es. `F8`): `RegisterHotKey` le consuma globalmente, come Medal e ShadowPlay.

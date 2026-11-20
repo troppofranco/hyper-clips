@@ -20,7 +20,11 @@ comunicazione è una named pipe locale, accessibile solo all'utente corrente e
 chiusa ai client remoti.
 
 ## Cattura
-- Il **microfono è disattivato di default**: va attivato esplicitamente nelle impostazioni.
+- Il **microfono è disattivato di default**: va attivato esplicitamente nelle impostazioni. Anche la **webcam** è spenta di default e la camera viene aperta solo se la attivi.
+- La soppressione del rumore (RNNoise) e il noise gate girano in locale; non viene inviato alcun audio.
+- Le tracce audio per processo usano il "process loopback" di Windows: nessun handle verso il processo del gioco, nessuna iniezione.
+- L'overlay delle notifiche è escluso dalle catture (`WDA_EXCLUDEFROMCAPTURE`) e non compare mai nelle clip.
+- Il buffer di replay su disco è un file temporaneo nella cartella dell'app, aperto con cancellazione automatica alla chiusura (anche dopo un crash).
 - Il riconoscimento del gioco legge solo il nome dell'eseguibile della finestra in primo piano, con un handle di sola interrogazione: non legge la memoria dei processi e non inietta nulla. Il database dei giochi è un file locale (`games.toml`).
 - Le clip non contengono metadati: né titolo, né software, né date nel file. Il nome del gioco compare solo nel nome del file e della cartella.
 

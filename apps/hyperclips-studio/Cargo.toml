@@ -22,6 +22,7 @@ wgpu = ["eframe/wgpu"]
 
 [dependencies]
 eframe = { workspace = true, default-features = false, features = ["accesskit", "default_fonts"] }
+hc-capture.workspace = true
 hc-core.workspace = true
 hc-hotkeys.workspace = true
 tracing.workspace = true

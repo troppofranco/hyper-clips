@@ -28,6 +28,7 @@ pub struct Config {
     pub general: General,
     pub capture: Capture,
     pub audio: Audio,
+    pub webcam: Webcam,
     pub hotkeys: Hotkeys,
     pub notifications: Notifications,
     pub privacy: Privacy,
@@ -121,6 +122,13 @@ pub struct Capture {
     pub cqp: u8,
     pub monitor: MonitorChoice,
     pub screenshot_format: ScreenshotFormat,
+    pub mode: CaptureMode,
+    /// Virtual-desktop rectangle for `CaptureMode::Region`.
+    pub region: Option<Region>,
+    /// Draw the mouse pointer into the video.
+    pub show_cursor: bool,
+    /// SDR paper white used when tone-mapping an HDR desktop (nits).
+    pub sdr_white_nits: u32,
 }
 
 impl Default for Capture {
@@ -137,6 +145,10 @@ impl Default for Capture {
             cqp: 23,
             monitor: MonitorChoice::Game,
             screenshot_format: ScreenshotFormat::Png,
+            mode: CaptureMode::Monitor,
+            region: None,
+            show_cursor: true,
+            sdr_white_nits: 200,
         }
     }
 }
@@ -156,6 +168,50 @@ pub enum ScreenshotFormat {
     #[default]
     Png,
     Jpg,
+    Webp,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum CaptureMode {
+    /// Whole monitor via Desktop Duplication (best for fullscreen games).
+    #[default]
+    Monitor,
+    /// Only the game window via Windows Graphics Capture.
+    Window,
+    /// A fixed rectangle of the desktop.
+    Region,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Region {
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Webcam {
+    /// Off by default: the camera is only opened when explicitly enabled.
+    pub enabled: bool,
+    /// Camera friendly name; None = first camera.
+    pub device: Option<String>,
+    pub position: OverlayPosition,
+    /// Overlay height as a percentage of the video height.
+    pub size_percent: u32,
+}
+
+impl Default for Webcam {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            device: None,
+            position: OverlayPosition::BottomRight,
+            size_percent: 25,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -170,6 +226,18 @@ pub struct Audio {
     pub microphone_volume: u32,
     /// AAC bitrate in kbps (96/128/160/192).
     pub bitrate_kbps: u32,
+    /// Separate tracks for game, chat apps and other sounds (per-process
+    /// loopback, Windows 10 2004+). Falls back to one system track.
+    pub separate_tracks: bool,
+    /// Executables treated as voice chat.
+    pub chat_apps: Vec<String>,
+    /// Hotkey that must be held for the mic to be recorded ("" = always on).
+    pub push_to_talk: String,
+    pub noise_gate: bool,
+    /// Gate threshold in dBFS.
+    pub noise_gate_db: i32,
+    /// RNNoise-based suppression, fully local.
+    pub noise_suppression: bool,
 }
 
 impl Default for Audio {
@@ -180,6 +248,24 @@ impl Default for Audio {
             system_volume: 100,
             microphone_volume: 100,
             bitrate_kbps: 160,
+            separate_tracks: true,
+            chat_apps: [
+                "Discord.exe",
+                "DiscordPTB.exe",
+                "DiscordCanary.exe",
+                "TeamSpeak.exe",
+                "ts3client_win64.exe",
+                "Mumble.exe",
+                "ms-teams.exe",
+                "Teams.exe",
+                "slack.exe",
+            ]
+            .map(String::from)
+            .to_vec(),
+            push_to_talk: String::new(),
+            noise_gate: false,
+            noise_gate_db: -45,
+            noise_suppression: false,
         }
     }
 }
@@ -237,6 +323,8 @@ pub struct Notifications {
     pub enabled: bool,
     pub sound: bool,
     pub position: OverlayPosition,
+    /// Show notifications over the game instead of as Windows toasts.
+    pub in_game: bool,
 }
 
 impl Default for Notifications {
@@ -245,6 +333,7 @@ impl Default for Notifications {
             enabled: true,
             sound: true,
             position: OverlayPosition::TopRight,
+            in_game: true,
         }
     }
 }
@@ -349,6 +438,9 @@ impl Config {
         self.audio.system_volume = self.audio.system_volume.min(200);
         self.audio.microphone_volume = self.audio.microphone_volume.min(200);
         self.audio.bitrate_kbps = self.audio.bitrate_kbps.clamp(96, 192);
+        self.audio.noise_gate_db = self.audio.noise_gate_db.clamp(-90, 0);
+        self.webcam.size_percent = self.webcam.size_percent.clamp(5, 60);
+        self.capture.sdr_white_nits = self.capture.sdr_white_nits.clamp(80, 1000);
         self.updates.interval_hours = self.updates.interval_hours.clamp(1, 24 * 30);
         if self.general.language.trim().is_empty() {
             self.general.language = "auto".into();

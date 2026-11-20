@@ -83,6 +83,7 @@ fn subtype(codec: VideoCodec) -> GUID {
     match codec {
         VideoCodec::H264 => MFVideoFormat_H264,
         VideoCodec::Hevc => MFVideoFormat_HEVC,
+        VideoCodec::Av1 => MFVideoFormat_AV1,
     }
 }
 
@@ -133,7 +134,7 @@ fn enumerate(codec: VideoCodec, hardware: bool, luid: Option<LUID>) -> Vec<IMFAc
 /// List encoders usable on the given adapter (hardware first).
 pub fn available_encoders(luid: Option<LUID>) -> Vec<EncoderDesc> {
     let mut out = Vec::new();
-    for codec in [VideoCodec::H264, VideoCodec::Hevc] {
+    for codec in [VideoCodec::H264, VideoCodec::Hevc, VideoCodec::Av1] {
         for hw in [true, false] {
             for a in enumerate(codec, hw, if hw { luid } else { None }) {
                 out.push(EncoderDesc {
@@ -246,8 +247,11 @@ impl VideoEncoder {
             let profile = match cfg.codec {
                 VideoCodec::H264 => eAVEncH264VProfile_High.0 as u32,
                 VideoCodec::Hevc => eAVEncH265VProfile_Main_420_8.0 as u32,
+                VideoCodec::Av1 => 0, // Main
             };
-            out_type.SetUINT32(&MF_MT_MPEG2_PROFILE, profile)?;
+            if cfg.codec != VideoCodec::Av1 {
+                out_type.SetUINT32(&MF_MT_MPEG2_PROFILE, profile)?;
+            }
             transform.SetOutputType(0, &out_type, 0)?;
 
             let in_type = MFCreateMediaType()?;

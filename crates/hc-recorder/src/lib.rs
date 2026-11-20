@@ -19,7 +19,8 @@ use std::thread::JoinHandle;
 
 use crossbeam_channel::{Sender, bounded, unbounded};
 use hc_capture::desktop::MonitorSelect;
-use hc_core::config::{Audio, Capture, Codec, RateControl};
+use hc_capture::screenshot::ImageFormat;
+use hc_core::config::{Audio, Capture, Codec, RateControl, Webcam};
 use hc_core::media::{VideoCodec, now_ticks};
 use hc_encode::video::Rate;
 
@@ -66,11 +67,28 @@ pub enum Event {
     Error(String),
 }
 
+/// What to capture.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CaptureTarget {
+    /// A monitor, optionally cropped to a virtual-desktop region (x, y, w, h).
+    Monitor {
+        select: MonitorSelect,
+        region: Option<(i32, i32, u32, u32)>,
+    },
+    /// One window (WGC); center picks the GPU/monitor it lives on.
+    Window { hwnd: isize, center: (i32, i32) },
+}
+
 #[derive(Debug, Clone)]
 pub struct ServiceConfig {
     pub capture: Capture,
     pub audio: Audio,
-    pub monitor: MonitorSelect,
+    pub webcam: Webcam,
+    pub target: CaptureTarget,
+    /// Process of the game in focus, for per-process audio.
+    pub game_pid: Option<u32>,
+    /// Where a disk-backed replay buffer may live (deleted on close).
+    pub tmp_dir: std::path::PathBuf,
     /// Seconds kept in RAM when Instant Replay is off (pre-roll for recordings).
     pub min_buffer_seconds: u32,
 }
@@ -80,10 +98,7 @@ impl ServiceConfig {
         match self.capture.codec {
             Codec::H264 => VideoCodec::H264,
             Codec::Hevc => VideoCodec::Hevc,
-            Codec::Av1 => {
-                tracing::warn!("AV1 capture not available yet, using H.264");
-                VideoCodec::H264
-            }
+            Codec::Av1 => VideoCodec::Av1,
         }
     }
 
@@ -113,6 +128,7 @@ pub struct CaptureService {
     stop: Arc<AtomicBool>,
     recording: Arc<AtomicBool>,
     buffer_bytes: Arc<AtomicUsize>,
+    audio_cmd: Option<Sender<audio_thread::AudioCmd>>,
     threads: Vec<JoinHandle<()>>,
 }
 
@@ -163,10 +179,13 @@ impl CaptureService {
             Err(_) => return Err(ServiceError::Other("video thread died".into())),
         }
 
+        let mut audio_cmd = None;
         if cfg.audio.system || cfg.audio.microphone {
-            let audio = audio_thread::spawn(cfg, t0, stop.clone(), sink_tx.clone(), events)
+            let (tx, rx) = unbounded();
+            let audio = audio_thread::spawn(cfg, t0, stop.clone(), sink_tx.clone(), events, rx)
                 .map_err(|e| ServiceError::Other(e.to_string()))?;
             threads.push(audio);
+            audio_cmd = Some(tx);
         }
         Ok(Self {
             sink: sink_tx,
@@ -174,6 +193,7 @@ impl CaptureService {
             stop,
             recording,
             buffer_bytes,
+            audio_cmd,
             threads,
         })
     }
@@ -182,10 +202,17 @@ impl CaptureService {
         let _ = self.sink.send(sink::SinkMsg::Cmd(cmd));
     }
 
-    pub fn screenshot(&self, path: PathBuf, jpeg: bool) {
+    pub fn screenshot(&self, path: PathBuf, format: ImageFormat) {
         let _ = self
             .video_cmd
-            .send(video_thread::VideoCmd::Screenshot { path, jpeg });
+            .send(video_thread::VideoCmd::Screenshot { path, format });
+    }
+
+    /// Tell the audio thread which process is the game (per-process tracks).
+    pub fn set_game_pid(&self, pid: Option<u32>) {
+        if let Some(tx) = &self.audio_cmd {
+            let _ = tx.send(audio_thread::AudioCmd::SetGame(pid));
+        }
     }
 
     /// Bytes of encoded media currently held by the replay buffer.

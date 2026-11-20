@@ -5,7 +5,19 @@ use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use hc_capture::convert::{Nv12Converter, output_size};
+use hc_capture::convert::{ConvertParams, Nv12Converter, output_size};
+
+fn params(in_w: u32, in_h: u32, w: u32, h: u32, fps: u32) -> ConvertParams {
+    ConvertParams {
+        in_width: in_w,
+        in_height: in_h,
+        crop: None,
+        out_width: w,
+        out_height: h,
+        fps,
+        pool_size: 4,
+    }
+}
 use hc_capture::desktop::{DesktopCapture, MonitorSelect, create_device, select_output};
 use hc_core::media::{Packet, StreamSet, TIMEBASE, VideoCodec, now_ticks};
 use hc_encode::mp4::Mp4Writer;
@@ -57,9 +69,11 @@ pub fn spike_pipeline(codec: Option<&str>) -> ExitCode {
     let _ = cap.acquire(100);
     mem("+ desktop duplication + 1 frame");
     let (w, h) = output_size(out.width(), out.height(), 1080);
-    let Ok(mut conv) =
-        Nv12Converter::new(&device, &context, out.width(), out.height(), w, h, 60, 8)
-    else {
+    let Ok(mut conv) = Nv12Converter::new(
+        &device,
+        &context,
+        &params(out.width(), out.height(), w, h, 60),
+    ) else {
         return ExitCode::FAILURE;
     };
     mem("+ NV12 converter (8 surfaces)");
@@ -123,6 +137,97 @@ pub fn dd_diag() -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// List active audio sessions on the default output with their process and
+/// current peak level (which app is actually making sound).
+pub fn audio_sessions() -> ExitCode {
+    use windows::Win32::Media::Audio::Endpoints::IAudioMeterInformation;
+    use windows::Win32::Media::Audio::{
+        IAudioSessionControl2, IAudioSessionManager2, IMMDeviceEnumerator, MMDeviceEnumerator,
+        eConsole, eRender,
+    };
+    use windows::Win32::System::Com::{CLSCTX_ALL, CoCreateInstance};
+    use windows::core::Interface;
+    hc_encode::mf::init_thread();
+    // SAFETY: COM enumeration of audio sessions; all objects ref-counted.
+    let res: windows::core::Result<()> = unsafe {
+        (|| {
+            let en: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
+            let dev = en.GetDefaultAudioEndpoint(eRender, eConsole)?;
+            let mgr: IAudioSessionManager2 = dev.Activate(CLSCTX_ALL, None)?;
+            let list = mgr.GetSessionEnumerator()?;
+            for i in 0..list.GetCount()? {
+                let ctl = list.GetSession(i)?;
+                let ctl2: IAudioSessionControl2 = ctl.cast()?;
+                let pid = ctl2.GetProcessId().unwrap_or(0);
+                let peak = ctl
+                    .cast::<IAudioMeterInformation>()
+                    .and_then(|m| m.GetPeakValue())
+                    .unwrap_or(0.0);
+                let state = ctl.GetState().map(|s| s.0).unwrap_or(-1);
+                let name = all_process_names()
+                    .into_iter()
+                    .find(|(p, _)| *p == pid)
+                    .map(|(_, n)| n)
+                    .unwrap_or_default();
+                println!("  pid {pid:>6} {name:<28} state {state} peak {peak:.3}");
+            }
+            Ok(())
+        })()
+    };
+    match res {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("{e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn all_process_names() -> Vec<(u32, String)> {
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW,
+        TH32CS_SNAPPROCESS,
+    };
+    let mut out = Vec::new();
+    // SAFETY: snapshot walk, handle closed.
+    unsafe {
+        let Ok(snap) = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) else {
+            return out;
+        };
+        let mut e = PROCESSENTRY32W {
+            dwSize: size_of::<PROCESSENTRY32W>() as u32,
+            ..Default::default()
+        };
+        let mut ok = Process32FirstW(snap, &mut e).is_ok();
+        while ok {
+            let len = e.szExeFile.iter().position(|&c| c == 0).unwrap_or(0);
+            out.push((
+                e.th32ProcessID,
+                String::from_utf16_lossy(&e.szExeFile[..len]),
+            ));
+            ok = Process32NextW(snap, &mut e).is_ok();
+        }
+        let _ = CloseHandle(snap);
+    }
+    out
+}
+
+pub fn levels(path: &str) -> ExitCode {
+    match hc_encode::probe::audio_levels(Path::new(path)) {
+        Ok(list) => {
+            for (stream, name, rms, peak) in list {
+                println!("  stream #{stream} {name:<12} RMS {rms:6.1} dBFS, peak {peak:6.1} dBFS");
+            }
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("decode failed: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
 pub fn probe(path: &str) -> ExitCode {
     match hc_encode::probe::probe(Path::new(path)) {
         Ok(r) => {
@@ -155,16 +260,60 @@ pub fn probe(path: &str) -> ExitCode {
 }
 
 /// Run the full capture service, save a clip after `secs` and record in parallel.
-pub fn service_test(secs: u64, out_path: &str, mic: bool) -> ExitCode {
+/// (hwnd, centre) of the current foreground window.
+fn hc_detect_fg() -> Option<(isize, (i32, i32))> {
+    use windows::Win32::Foundation::RECT;
+    use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowRect};
+    // SAFETY: plain window queries.
+    unsafe {
+        let h = GetForegroundWindow();
+        let mut r = RECT::default();
+        GetWindowRect(h, &mut r).ok()?;
+        Some((
+            h.0 as isize,
+            ((r.left + r.right) / 2, (r.top + r.bottom) / 2),
+        ))
+    }
+}
+
+pub fn service_test(secs: u64, out_path: &str, opts: &[String]) -> ExitCode {
+    let mic = opts.iter().any(|a| a == "--mic");
     use hc_recorder::{CaptureService, Event, ServiceConfig, SinkCmd};
     let mut cfg = ServiceConfig {
         capture: hc_core::config::Capture::default(),
         audio: hc_core::config::Audio::default(),
-        monitor: MonitorSelect::Primary,
+        webcam: hc_core::config::Webcam {
+            enabled: opts.iter().any(|a| a == "--webcam"),
+            ..Default::default()
+        },
+        target: match (opts.iter().any(|a| a == "--window"), hc_detect_fg()) {
+            (true, Some((hwnd, center))) => hc_recorder::CaptureTarget::Window { hwnd, center },
+            _ => hc_recorder::CaptureTarget::Monitor {
+                select: MonitorSelect::Primary,
+                region: opts
+                    .iter()
+                    .any(|a| a == "--region")
+                    .then_some((200, 100, 1280, 720)),
+            },
+        },
+        game_pid: hc_core::sys::process_tree_roots(&[
+            std::env::var("HC_GAME_EXE").unwrap_or_else(|_| "GeometryDash.exe".into())
+        ])
+        .first()
+        .copied(),
+        tmp_dir: std::env::temp_dir().join("hc-bench-tmp"),
         min_buffer_seconds: 5,
     };
     cfg.capture.replay_seconds = 30;
     cfg.audio.microphone = mic;
+    if opts.iter().any(|a| a == "--disk") {
+        cfg.capture.buffer_storage = hc_core::config::BufferStorage::Disk;
+    }
+    if opts.iter().any(|a| a == "--av1") {
+        cfg.capture.codec = hc_core::config::Codec::Av1;
+    }
+    let log_dir = std::env::temp_dir().join("hc-bench-logs");
+    let _log = hc_core::logging::init(&log_dir, "bench", hc_core::config::LogLevel::Debug).ok();
     let (tx, rx) = crossbeam_channel::unbounded();
     let service = match CaptureService::start(cfg, tx) {
         Ok(s) => s,
@@ -184,7 +333,10 @@ pub fn service_test(secs: u64, out_path: &str, mic: bool) -> ExitCode {
         path: out_path.into(),
         seconds: None,
     });
-    service.screenshot(format!("{out_path}.png").into(), false);
+    service.screenshot(
+        format!("{out_path}.webp").into(),
+        hc_capture::screenshot::ImageFormat::Webp,
+    );
     std::thread::sleep(Duration::from_millis(1500));
     service.command(SinkCmd::StopRecording);
     std::thread::sleep(Duration::from_millis(500));
@@ -244,6 +396,7 @@ fn run_video_test(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let codec = match codec {
         Some("hevc") => VideoCodec::Hevc,
+        Some("av1") => VideoCodec::Av1,
         _ => VideoCodec::H264,
     };
     let fps = 60u32;
@@ -251,7 +404,11 @@ fn run_video_test(
     let (device, context) = create_device(out.adapter_index)?;
     let mut cap = DesktopCapture::new(out.clone(), device.clone(), context.clone())?;
     let (w, h) = output_size(out.width(), out.height(), 1080);
-    let mut conv = Nv12Converter::new(&device, &context, out.width(), out.height(), w, h, fps, 8)?;
+    let mut conv = Nv12Converter::new(
+        &device,
+        &context,
+        &params(out.width(), out.height(), w, h, fps),
+    )?;
     let cfg = VideoConfig {
         codec,
         width: w,

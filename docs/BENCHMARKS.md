@@ -87,3 +87,36 @@ ready 250 ms later.
 Encode submit time: 0.15 ms/frame on the capture thread (`hc-bench video-test`).
 Game FPS impact not yet measured (needs PresentMon on a reproducible
 benchmark: run by the user, see CONTRIBUTING).
+
+## Phase 2 completion — 2026-11-20
+
+Defaults now include cursor compositing and separate per-process audio
+tracks (Mix, Game, Chat, Other). Core RAM excluding the replay buffer,
+25 s after start, one setting changed at a time:
+
+| Configuration | Working set (excl. buffer) |
+|---|---|
+| No cursor, single system track | 83.1 MB |
+| + cursor compositing (D3D11 shaders, extra BGRA target) | 86.9 MB (+3.8) |
+| + separate audio tracks (3 process-loopback clients, 4 AAC encoders) | 112.3 MB (+29.2) |
+| All defaults | 116.9 MB |
+
+70 s with all defaults, game running: CPU **0.57 %** avg (max 1.17 %),
+working set 124–276 MB of which up to 149 MB is the 60 s replay buffer
+(20 Mbps VBR during action).
+
+Per-process audio verified with `hc-bench service-test` + pre-encode level
+log, a game and Discord running:
+`Mix=-31.6 dB Game=-31.6 dB Chat=-96.7 dB System=-96.7 dB` (game only) and
+`Mix=-23.2 Game=-34.4 Chat=-23.5 System=-23.5` (game + voice): the game is
+isolated, and "System" excludes it.
+
+Disk replay buffer (`--disk`): 30 s window → 223 MB ring file, deleted on
+close; RAM for the buffer drops to metadata only (~40 bytes/packet).
+
+Studio idle (settings page reachable): 73.6 MB working set.
+
+**Target status:** core < 60 MB is still missed (83 MB minimum). Turning
+off separate tracks saves ~29 MB. Phase 7 work: native NVENC/AMF without
+the MFT layer, sharing one WASAPI activation for the process-loopback
+sources, lazy compositor.

@@ -66,6 +66,9 @@ pub struct Foreground {
     /// Centre of the foreground window (virtual desktop coordinates).
     pub center: (i32, i32),
     pub covers_monitor: bool,
+    pub pid: u32,
+    /// Window handle as an integer (HWND is not Send).
+    pub hwnd: isize,
 }
 
 #[derive(Debug, Default)]
@@ -182,6 +185,8 @@ pub fn foreground() -> Option<(String, Foreground)> {
             Foreground {
                 center: ((rect.left + rect.right) / 2, (rect.top + rect.bottom) / 2),
                 covers_monitor: covers,
+                pid,
+                hwnd: hwnd.0 as isize,
             },
         ))
     }

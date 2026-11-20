@@ -51,6 +51,7 @@ struct App {
     started: Instant,
     taskbar_created: u32,
     capture: CaptureCtl,
+    overlay: Option<crate::overlay::Overlay>,
 }
 
 thread_local! {
@@ -112,6 +113,9 @@ pub fn run(background: bool) -> ExitCode {
         ipc_rx,
         started: t0,
         capture: CaptureCtl::new(hwnd, &paths),
+        overlay: crate::overlay::Overlay::new()
+            .inspect_err(|e| tracing::warn!(error = %e, "in-game overlay unavailable"))
+            .ok(),
         // SAFETY: constant string.
         taskbar_created: unsafe { RegisterWindowMessageW(w!("TaskbarCreated")) },
         paths,
@@ -214,9 +218,25 @@ impl App {
 
     fn toast(&self, text: &str, warning: bool) {
         let n = &self.config.notifications;
-        if n.enabled {
-            self.tray.notify(hc_core::APP_NAME, text, warning, n.sound);
+        if !n.enabled {
+            return;
         }
+        // Over the game when it is in front; Windows toast otherwise.
+        if n.in_game
+            && let (Some(ov), Some(anchor)) = (&self.overlay, self.capture.game_in_front())
+        {
+            ov.show(text, n.position, anchor, self.capture.is_recording());
+            if n.sound {
+                // SAFETY: plain system sound request.
+                unsafe {
+                    let _ = windows::Win32::System::Diagnostics::Debug::MessageBeep(
+                        windows::Win32::UI::WindowsAndMessaging::MB_ICONASTERISK,
+                    );
+                }
+            }
+            return;
+        }
+        self.tray.notify(hc_core::APP_NAME, text, warning, n.sound);
     }
 
     fn menu_items(&self) -> Vec<(MenuCmd, String)> {

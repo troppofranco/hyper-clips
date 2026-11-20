@@ -100,6 +100,7 @@ impl<W: Write + Seek> Mp4Writer<W> {
             match streams.video.codec {
                 VideoCodec::H264 => b.extend_from_slice(b"avc1"),
                 VideoCodec::Hevc => b.extend_from_slice(b"hvc1"),
+                VideoCodec::Av1 => b.extend_from_slice(b"av01"),
             }
         });
         out.write_all(&ftyp)?;
@@ -238,11 +239,15 @@ impl<W: Write + Seek> Mp4Writer<W> {
                     b.extend_from_slice(&0u32.to_be_bytes());
                     b.extend_from_slice(if is_video { b"vide" } else { b"soun" });
                     b.extend_from_slice(&[0; 12]);
-                    b.extend_from_slice(if is_video {
-                        b"VideoHandler\0"
-                    } else {
-                        b"SoundHandler\0"
-                    });
+                    // Audio handlers carry the track role so players and the
+                    // editor can tell Mix / Game / Chat / ... apart.
+                    match audio {
+                        None => b.extend_from_slice(b"VideoHandler\0"),
+                        Some(a) => {
+                            b.extend_from_slice(a.role.label().as_bytes());
+                            b.push(0);
+                        }
+                    }
                 });
                 boxed(b, b"minf", |b| {
                     if is_video {
@@ -339,6 +344,7 @@ fn video_entry(b: &mut Vec<u8>, v: &VideoInfo) {
     let kind = match v.codec {
         VideoCodec::H264 => b"avc1",
         VideoCodec::Hevc => b"hvc1",
+        VideoCodec::Av1 => b"av01",
     };
     boxed(b, kind, |b| {
         b.extend_from_slice(&[0; 6]);
@@ -356,6 +362,7 @@ fn video_entry(b: &mut Vec<u8>, v: &VideoInfo) {
         match v.codec {
             VideoCodec::H264 => avcc(b, &v.param_sets),
             VideoCodec::Hevc => hvcc(b, &v.param_sets),
+            VideoCodec::Av1 => av1c(b, &v.param_sets),
         }
     });
 }
@@ -423,6 +430,14 @@ fn hvcc(b: &mut Vec<u8>, sets: &[Vec<u8>]) {
                 b.extend_from_slice(n);
             }
         }
+    });
+}
+
+fn av1c(b: &mut Vec<u8>, sets: &[Vec<u8>]) {
+    let seq = sets.first().map(Vec::as_slice).unwrap_or(&[]);
+    boxed(b, b"av1C", |b| {
+        b.extend_from_slice(&crate::bitstream::av1c_header(seq));
+        b.extend_from_slice(seq);
     });
 }
 

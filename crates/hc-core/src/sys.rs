@@ -220,6 +220,43 @@ pub fn find_processes(exe_name: &str) -> Vec<u32> {
     out
 }
 
+/// Root PIDs of the process trees whose image name is in `names`
+/// (a match whose parent is also a match is not a root).
+pub fn process_tree_roots(names: &[String]) -> Vec<u32> {
+    use windows::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW,
+        TH32CS_SNAPPROCESS,
+    };
+    let mut all: Vec<(u32, u32, bool)> = Vec::new();
+    // SAFETY: snapshot handle closed below; entry struct sized correctly.
+    unsafe {
+        let Ok(snap) = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) else {
+            return Vec::new();
+        };
+        let mut e = PROCESSENTRY32W {
+            dwSize: size_of::<PROCESSENTRY32W>() as u32,
+            ..Default::default()
+        };
+        let mut ok = Process32FirstW(snap, &mut e).is_ok();
+        while ok {
+            let len = e
+                .szExeFile
+                .iter()
+                .position(|&c| c == 0)
+                .unwrap_or(e.szExeFile.len());
+            let name = String::from_utf16_lossy(&e.szExeFile[..len]);
+            let hit = names.iter().any(|n| n.eq_ignore_ascii_case(&name));
+            all.push((e.th32ProcessID, e.th32ParentProcessID, hit));
+            ok = Process32NextW(snap, &mut e).is_ok();
+        }
+        let _ = CloseHandle(snap);
+    }
+    all.iter()
+        .filter(|(_, parent, hit)| *hit && !all.iter().any(|(p, _, h)| p == parent && *h))
+        .map(|(pid, _, _)| *pid)
+        .collect()
+}
+
 /// Restore and bring to front the main window of `pid`. Returns false if none found.
 pub fn focus_process_window(pid: u32) -> bool {
     use windows::Win32::Foundation::{HWND, LPARAM};
@@ -267,6 +304,13 @@ pub fn focus_process_window(pid: u32) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn own_process_is_a_tree_root() {
+        let exe = std::env::current_exe().unwrap();
+        let name = exe.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(process_tree_roots(&[name]).contains(&std::process::id()));
+    }
 
     #[test]
     fn finds_own_process() {

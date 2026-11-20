@@ -23,6 +23,8 @@ clap = { version = "4.6.9", default-features = false, features = ["std", "derive
 crossbeam-channel = "0.5.17"
 eframe = { version = "0.37.0", default-features = false }
 fluent-bundle = "0.16.0"
+image-webp = "0.2.4"
+nnnoiseless = { version = "0.5.2", default-features = false }
 postcard = { version = "1.1.3", default-features = false, features = ["use-std"] }
 serde = { version = "1.0.229", features = ["derive"] }
 thiserror = "2.0.21"
@@ -32,6 +34,7 @@ tracing-appender = "0.2.5"
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["fmt", "std", "registry", "ansi"] }
 unic-langid = "0.9.6"
 windows = "0.62.2"
+windows-core = "0.62.2"
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

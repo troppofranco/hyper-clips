@@ -15,6 +15,9 @@ use windows::Win32::Graphics::Direct3D11::{
     ID3D11VideoContext, ID3D11VideoDevice, ID3D11VideoProcessor, ID3D11VideoProcessorEnumerator,
     ID3D11VideoProcessorInputView, ID3D11VideoProcessorOutputView,
 };
+use windows::Win32::Graphics::Direct3D11::{
+    D3D11_VIDEO_COLOR, D3D11_VIDEO_COLOR_0, D3D11_VIDEO_COLOR_RGBA,
+};
 use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_NV12, DXGI_RATIONAL, DXGI_SAMPLE_DESC};
 use windows::core::Interface;
 
@@ -32,6 +35,38 @@ pub fn output_size(src_w: u32, src_h: u32, target_height: u32) -> (u32, u32) {
     (w.max(2) & !1, h.max(2) & !1)
 }
 
+/// Fit src (w, h) inside dst (w, h) preserving aspect: returns the
+/// centred destination rectangle (letterbox / pillarbox).
+pub fn fit_rect(src: (u32, u32), dst: (u32, u32)) -> RECT {
+    let (sw, sh) = (u64::from(src.0.max(1)), u64::from(src.1.max(1)));
+    let (dw, dh) = (u64::from(dst.0), u64::from(dst.1));
+    let (w, h) = if sw * dh > dw * sh {
+        (dw, sh * dw / sw)
+    } else {
+        (sw * dh / sh, dh)
+    };
+    let x = (dw - w) / 2;
+    let y = (dh - h) / 2;
+    RECT {
+        left: x as i32,
+        top: y as i32,
+        right: (x + w) as i32,
+        bottom: (y + h) as i32,
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ConvertParams {
+    pub in_width: u32,
+    pub in_height: u32,
+    /// Region of the input to keep (monitor-region capture); None = all.
+    pub crop: Option<RECT>,
+    pub out_width: u32,
+    pub out_height: u32,
+    pub fps: u32,
+    pub pool_size: usize,
+}
+
 pub struct Nv12Converter {
     vdev: ID3D11VideoDevice,
     vctx: ID3D11VideoContext,
@@ -45,17 +80,19 @@ pub struct Nv12Converter {
 }
 
 impl Nv12Converter {
-    #[allow(clippy::too_many_arguments)] // flat D3D parameters read clearer than a one-off struct
     pub fn new(
         device: &ID3D11Device,
         context: &ID3D11DeviceContext,
-        in_w: u32,
-        in_h: u32,
-        out_w: u32,
-        out_h: u32,
-        fps: u32,
-        pool_size: usize,
+        p: &ConvertParams,
     ) -> Result<Self, CaptureError> {
+        let (in_w, in_h, out_w, out_h, fps, pool_size) = (
+            p.in_width,
+            p.in_height,
+            p.out_width,
+            p.out_height,
+            p.fps,
+            p.pool_size,
+        );
         // SAFETY: D3D11 video API calls on interfaces we own.
         unsafe {
             let vdev: ID3D11VideoDevice = device.cast()?;
@@ -90,13 +127,19 @@ impl Nv12Converter {
                 0,
                 D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE,
             );
-            let src = RECT {
+            let full = RECT {
                 left: 0,
                 top: 0,
                 right: in_w as i32,
                 bottom: in_h as i32,
             };
-            let dst = RECT {
+            let src = p.crop.unwrap_or(full);
+            let src_size = (
+                (src.right - src.left).max(1) as u32,
+                (src.bottom - src.top).max(1) as u32,
+            );
+            let dst = fit_rect(src_size, (out_w, out_h));
+            let target = RECT {
                 left: 0,
                 top: 0,
                 right: out_w as i32,
@@ -104,7 +147,19 @@ impl Nv12Converter {
             };
             vctx.VideoProcessorSetStreamSourceRect(&processor, 0, true, Some(&src));
             vctx.VideoProcessorSetStreamDestRect(&processor, 0, true, Some(&dst));
-            vctx.VideoProcessorSetOutputTargetRect(&processor, true, Some(&dst));
+            vctx.VideoProcessorSetOutputTargetRect(&processor, true, Some(&target));
+            // Black bars around letterboxed content (RGB black).
+            let black = D3D11_VIDEO_COLOR {
+                Anonymous: D3D11_VIDEO_COLOR_0 {
+                    RGBA: D3D11_VIDEO_COLOR_RGBA {
+                        R: 0.0,
+                        G: 0.0,
+                        B: 0.0,
+                        A: 1.0,
+                    },
+                },
+            };
+            vctx.VideoProcessorSetOutputBackgroundColor(&processor, false, &black);
 
             let mut pool = Vec::with_capacity(pool_size);
             for _ in 0..pool_size.max(2) {
@@ -219,6 +274,16 @@ impl Nv12Converter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn letterbox() {
+        let r = fit_rect((1440, 2560), (1920, 1080));
+        assert_eq!((r.left, r.top, r.right, r.bottom), (656, 0, 1263, 1080));
+        let r = fit_rect((1920, 1080), (1920, 1080));
+        assert_eq!((r.left, r.top, r.right, r.bottom), (0, 0, 1920, 1080));
+        let r = fit_rect((3440, 1440), (1920, 1080));
+        assert_eq!((r.left, r.top, r.right, r.bottom), (0, 138, 1920, 941));
+    }
 
     #[test]
     fn sizes() {

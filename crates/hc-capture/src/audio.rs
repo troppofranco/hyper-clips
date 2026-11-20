@@ -4,34 +4,68 @@
 //! their first frame. The [`Mixer`] places them on one sample grid shared
 //! with video, fills gaps (loopback delivers nothing while the system is
 //! silent) with zeros, and emits fixed 1024-frame blocks (one AAC frame).
+//!
+//! Endpoints: the default render device in loopback (everything you hear),
+//! the default microphone, or a *process tree* via process loopback
+//! (Windows 10 2004+), used to split game, voice chat and other sounds.
 
 use std::collections::VecDeque;
-use std::sync::Arc;
+use std::mem::ManuallyDrop;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
 use crossbeam_channel::Sender;
-use hc_core::media::TIMEBASE;
+use hc_core::media::{TIMEBASE, now_ticks};
+use windows::Win32::Foundation::{CloseHandle, WAIT_OBJECT_0};
 use windows::Win32::Media::Audio::{
     AUDCLNT_BUFFERFLAGS_SILENT, AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM,
-    AUDCLNT_STREAMFLAGS_LOOPBACK, AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY, IAudioCaptureClient,
-    IAudioClient, IMMDeviceEnumerator, MMDeviceEnumerator, WAVE_FORMAT_PCM, WAVEFORMATEX, eCapture,
-    eConsole, eRender,
+    AUDCLNT_STREAMFLAGS_EVENTCALLBACK, AUDCLNT_STREAMFLAGS_LOOPBACK,
+    AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY, AUDIOCLIENT_ACTIVATION_PARAMS,
+    AUDIOCLIENT_ACTIVATION_PARAMS_0, AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK,
+    AUDIOCLIENT_PROCESS_LOOPBACK_PARAMS, ActivateAudioInterfaceAsync,
+    IActivateAudioInterfaceAsyncOperation, IActivateAudioInterfaceCompletionHandler,
+    IActivateAudioInterfaceCompletionHandler_Impl, IAudioCaptureClient, IAudioClient,
+    IMMDeviceEnumerator, MMDeviceEnumerator, PROCESS_LOOPBACK_MODE_EXCLUDE_TARGET_PROCESS_TREE,
+    PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE, VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK,
+    WAVE_FORMAT_PCM, WAVEFORMATEX, eCapture, eConsole, eRender,
 };
+use windows::Win32::System::Com::StructuredStorage::PROPVARIANT;
 use windows::Win32::System::Com::{
-    CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx,
+    BLOB, CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx,
 };
+use windows::Win32::System::Threading::{CreateEventW, WaitForSingleObject};
+use windows::Win32::System::Variant::VT_BLOB;
+use windows::core::{IUnknown, Interface, implement};
 
 pub const RATE: u32 = 48_000;
 pub const CHANNELS: usize = 2;
 /// Frames per mixer block (= one AAC frame).
 pub const BLOCK: usize = 1024;
 
+/// Role of a source; also identifies its mixer queue.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SourceKind {
+    /// Everything played on the default device (or everything except the game).
     SystemLoopback,
     Microphone,
+    /// Only the game's process tree.
+    Game,
+    /// Only the voice-chat app's process tree.
+    Chat,
+}
+
+/// Where a source reads from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Endpoint {
+    DefaultRender,
+    DefaultCapture,
+    /// Process loopback: include (or exclude) a process and its children.
+    Process {
+        pid: u32,
+        include: bool,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -50,7 +84,7 @@ pub struct AudioSource {
 }
 
 impl AudioSource {
-    pub fn start(kind: SourceKind, tx: Sender<Chunk>) -> Self {
+    pub fn start(kind: SourceKind, endpoint: Endpoint, tx: Sender<Chunk>) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
         let st = stop.clone();
         let thread = std::thread::Builder::new()
@@ -61,11 +95,11 @@ impl AudioSource {
                     let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
                 }
                 while !st.load(Ordering::Relaxed) {
-                    if let Err(e) = run_endpoint(kind, &tx, &st) {
-                        tracing::warn!(?kind, error = %e, "audio endpoint unavailable, retrying");
+                    if let Err(e) = run_endpoint(kind, endpoint, &tx, &st) {
+                        tracing::warn!(?kind, ?endpoint, error = %e, "audio endpoint unavailable, retrying");
                     }
                     // Device missing or invalidated (unplugged, default changed): retry.
-                    for _ in 0..10 {
+                    for _ in 0..20 {
                         if st.load(Ordering::Relaxed) {
                             return;
                         }
@@ -87,45 +121,138 @@ impl Drop for AudioSource {
     }
 }
 
+#[implement(IActivateAudioInterfaceCompletionHandler)]
+struct ActivationDone(Arc<(Mutex<bool>, Condvar)>);
+
+impl IActivateAudioInterfaceCompletionHandler_Impl for ActivationDone_Impl {
+    fn ActivateCompleted(
+        &self,
+        _op: windows::core::Ref<IActivateAudioInterfaceAsyncOperation>,
+    ) -> windows::core::Result<()> {
+        let (lock, cv) = &*self.0;
+        if let Ok(mut done) = lock.lock() {
+            *done = true;
+            cv.notify_all();
+        }
+        Ok(())
+    }
+}
+
+/// Activate an IAudioClient bound to a process tree (process loopback).
+fn activate_process_loopback(pid: u32, include: bool) -> windows::core::Result<IAudioClient> {
+    let mut params = AUDIOCLIENT_ACTIVATION_PARAMS {
+        ActivationType: AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK,
+        Anonymous: AUDIOCLIENT_ACTIVATION_PARAMS_0 {
+            ProcessLoopbackParams: AUDIOCLIENT_PROCESS_LOOPBACK_PARAMS {
+                TargetProcessId: pid,
+                ProcessLoopbackMode: if include {
+                    PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE
+                } else {
+                    PROCESS_LOOPBACK_MODE_EXCLUDE_TARGET_PROCESS_TREE
+                },
+            },
+        },
+    };
+    // The PROPVARIANT only borrows `params`; never let anything free it.
+    let mut pv = ManuallyDrop::new(PROPVARIANT::default());
+    // SAFETY: filling the VT_BLOB member of a zeroed PROPVARIANT.
+    unsafe {
+        let inner = &mut *pv.Anonymous.Anonymous;
+        inner.vt = VT_BLOB;
+        inner.Anonymous.blob = BLOB {
+            cbSize: size_of::<AUDIOCLIENT_ACTIVATION_PARAMS>() as u32,
+            pBlobData: (&mut params as *mut AUDIOCLIENT_ACTIVATION_PARAMS).cast(),
+        };
+    }
+    let signal = Arc::new((Mutex::new(false), Condvar::new()));
+    let handler: IActivateAudioInterfaceCompletionHandler = ActivationDone(signal.clone()).into();
+    // SAFETY: `pv`/`params` outlive the wait below.
+    let op = unsafe {
+        ActivateAudioInterfaceAsync(
+            VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK,
+            &IAudioClient::IID,
+            Some(&*pv as *const PROPVARIANT),
+            &handler,
+        )?
+    };
+    let (lock, cv) = &*signal;
+    let guard = lock.lock().map_err(|_| windows::core::Error::empty())?;
+    let (guard, _) = cv
+        .wait_timeout_while(guard, Duration::from_secs(5), |done| !*done)
+        .map_err(|_| windows::core::Error::empty())?;
+    if !*guard {
+        return Err(windows::core::Error::empty());
+    }
+    drop(guard);
+    let mut hr = windows::core::HRESULT(0);
+    let mut unk: Option<IUnknown> = None;
+    // SAFETY: completion was signalled, results are ready.
+    unsafe { op.GetActivateResult(&mut hr, &mut unk)? };
+    hr.ok()?;
+    unk.ok_or_else(windows::core::Error::empty)?.cast()
+}
+
 fn run_endpoint(
     kind: SourceKind,
+    endpoint: Endpoint,
     tx: &Sender<Chunk>,
     stop: &AtomicBool,
 ) -> windows::core::Result<()> {
+    let format = WAVEFORMATEX {
+        wFormatTag: WAVE_FORMAT_PCM as u16,
+        nChannels: CHANNELS as u16,
+        nSamplesPerSec: RATE,
+        nAvgBytesPerSec: RATE * (CHANNELS as u32) * 2,
+        nBlockAlign: (CHANNELS as u16) * 2,
+        wBitsPerSample: 16,
+        cbSize: 0,
+    };
     // SAFETY: WASAPI calls on interfaces owned by this function; the capture
-    // buffer is released after each copy.
+    // buffer is released after each copy; the event handle is closed below.
     unsafe {
-        let enumerator: IMMDeviceEnumerator =
-            CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
-        let flow = match kind {
-            SourceKind::SystemLoopback => eRender,
-            SourceKind::Microphone => eCapture,
+        let (client, flags): (IAudioClient, _) = match endpoint {
+            Endpoint::Process { pid, include } => (
+                activate_process_loopback(pid, include)?,
+                AUDCLNT_STREAMFLAGS_LOOPBACK
+                    | AUDCLNT_STREAMFLAGS_EVENTCALLBACK
+                    | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM,
+            ),
+            Endpoint::DefaultRender | Endpoint::DefaultCapture => {
+                let enumerator: IMMDeviceEnumerator =
+                    CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
+                let flow = if endpoint == Endpoint::DefaultRender {
+                    eRender
+                } else {
+                    eCapture
+                };
+                let device = enumerator.GetDefaultAudioEndpoint(flow, eConsole)?;
+                let mut flags = AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM
+                    | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY
+                    | AUDCLNT_STREAMFLAGS_EVENTCALLBACK;
+                if endpoint == Endpoint::DefaultRender {
+                    flags |= AUDCLNT_STREAMFLAGS_LOOPBACK;
+                }
+                (device.Activate(CLSCTX_ALL, None)?, flags)
+            }
         };
-        let device = enumerator.GetDefaultAudioEndpoint(flow, eConsole)?;
-        let client: IAudioClient = device.Activate(CLSCTX_ALL, None)?;
-        let format = WAVEFORMATEX {
-            wFormatTag: WAVE_FORMAT_PCM as u16,
-            nChannels: CHANNELS as u16,
-            nSamplesPerSec: RATE,
-            nAvgBytesPerSec: RATE * (CHANNELS as u32) * 2,
-            nBlockAlign: (CHANNELS as u16) * 2,
-            wBitsPerSample: 16,
-            cbSize: 0,
-        };
-        let mut flags =
-            AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY;
-        if kind == SourceKind::SystemLoopback {
-            flags |= AUDCLNT_STREAMFLAGS_LOOPBACK;
-        }
         client.Initialize(AUDCLNT_SHAREMODE_SHARED, flags, 2_000_000, 0, &format, None)?;
+        let event = CreateEventW(None, false, false, None)?;
+        let set_event = client.SetEventHandle(event);
         let capture: IAudioCaptureClient = client.GetService()?;
         client.Start()?;
-        tracing::info!(?kind, "audio capture started");
+        tracing::info!(?kind, ?endpoint, "audio capture started");
         let result = loop {
             if stop.load(Ordering::Relaxed) {
                 break Ok(());
             }
-            std::thread::sleep(Duration::from_millis(10));
+            // Event-driven when supported, otherwise poll every 10 ms.
+            if set_event.is_ok() {
+                if WaitForSingleObject(event, 100) != WAIT_OBJECT_0 {
+                    continue;
+                }
+            } else {
+                std::thread::sleep(Duration::from_millis(10));
+            }
             let mut failed = None;
             loop {
                 match capture.GetNextPacketSize() {
@@ -154,10 +281,15 @@ fn run_endpoint(
                         std::slice::from_raw_parts(data as *const i16, n).to_vec()
                     };
                 let _ = capture.ReleaseBuffer(frames);
-                // qpc is already in 100 ns units.
+                // qpc is in 100 ns units; process loopback may not report it.
+                let pts = if qpc != 0 {
+                    qpc as i64
+                } else {
+                    now_ticks() - i64::from(frames) * TIMEBASE / i64::from(RATE)
+                };
                 let _ = tx.try_send(Chunk {
                     source: kind,
-                    pts: qpc as i64,
+                    pts,
                     samples,
                 });
             }
@@ -166,6 +298,7 @@ fn run_endpoint(
             }
         };
         let _ = client.Stop();
+        let _ = CloseHandle(event);
         result
     }
 }
@@ -182,6 +315,8 @@ pub struct Block {
 struct Queue {
     kind: SourceKind,
     gain: f32,
+    /// Whether this source is summed into the mix track.
+    in_mix: bool,
     /// Absolute frame index (on the grid) of `buf[0]`.
     start: i64,
     buf: VecDeque<i16>,
@@ -219,12 +354,22 @@ impl Mixer {
                 .map(|(kind, gain)| Queue {
                     kind: *kind,
                     gain: *gain,
+                    in_mix: true,
                     start: 0,
                     buf: VecDeque::new(),
                 })
                 .collect(),
             next: 0,
             latency_frames: (latency.as_secs_f64() * f64::from(RATE)) as i64,
+        }
+    }
+
+    /// Exclude a source from the mix track (it still gets its own stem).
+    pub fn set_in_mix(&mut self, kind: SourceKind, in_mix: bool) {
+        for q in &mut self.queues {
+            if q.kind == kind {
+                q.in_mix = in_mix;
+            }
         }
     }
 
@@ -290,8 +435,10 @@ impl Mixer {
                 }
                 q.start = from + BLOCK as i64;
                 let gain = q.gain;
-                for (m, s) in mix.iter_mut().zip(&block) {
-                    *m += f32::from(*s) * gain;
+                if q.in_mix {
+                    for (m, s) in mix.iter_mut().zip(&block) {
+                        *m += f32::from(*s) * gain;
+                    }
                 }
                 if (gain - 1.0).abs() > f32::EPSILON {
                     for s in &mut block {

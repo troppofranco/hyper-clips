@@ -9,7 +9,7 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use crossbeam_channel::{Receiver, RecvTimeoutError, Sender};
-use hc_buffer::ReplayBuffer;
+use hc_buffer::{ReplayBuffer, Snapshot};
 use hc_core::media::{AudioInfo, Packet, StreamSet, TIMEBASE, VideoInfo, now_ticks};
 use hc_encode::mp4::Mp4Writer;
 
@@ -48,7 +48,6 @@ struct Recording {
     writer: Mp4Writer<BufWriter<File>>,
     path: PathBuf,
     origin: i64,
-    started_at: i64,
     markers: Vec<f64>,
 }
 
@@ -61,16 +60,51 @@ struct Sink {
     /// Waiting for the next keyframe to start a recording.
     pending_recording: Option<PathBuf>,
     markers: Vec<i64>,
+    ring_error: bool,
     events: Sender<Event>,
     video_cmd: Sender<VideoCmd>,
     recording_flag: Arc<AtomicBool>,
     buffer_bytes: Arc<AtomicUsize>,
 }
 
-fn ring_bytes(cfg: &ServiceConfig, seconds: u32) -> usize {
+fn ring_bytes(cfg: &ServiceConfig, seconds: u32) -> u64 {
     let video = u64::from(cfg.capture.bitrate_kbps.max(20_000)) * 1000 / 8 * 2;
-    let audio = 4 * 24_000;
-    ((video + audio) * u64::from(seconds) + 32 * 1024 * 1024) as usize
+    let audio = 5 * 24_000;
+    (video + audio) * u64::from(seconds) + 32 * 1024 * 1024
+}
+
+/// Above this length, Auto storage keeps the replay on disk.
+const AUTO_DISK_SECONDS: u32 = 120;
+
+pub fn uses_disk(cfg: &ServiceConfig) -> bool {
+    use hc_core::config::BufferStorage;
+    match cfg.capture.buffer_storage {
+        BufferStorage::Memory => false,
+        BufferStorage::Disk => cfg.capture.replay_enabled,
+        BufferStorage::Auto => {
+            cfg.capture.replay_enabled && cfg.buffer_seconds() > AUTO_DISK_SECONDS
+        }
+    }
+}
+
+fn make_ring(cfg: &ServiceConfig) -> ReplayBuffer {
+    let secs = cfg.buffer_seconds();
+    if uses_disk(cfg) {
+        // Ring file sized for the window plus headroom for clips being saved.
+        let cap = (ring_bytes(cfg, secs) as f64 / 0.8) as u64;
+        match ReplayBuffer::new_disk(secs, &cfg.tmp_dir, cap) {
+            Ok(b) => {
+                tracing::info!(
+                    seconds = secs,
+                    mb = cap / 1_048_576,
+                    "replay buffer on disk"
+                );
+                return b;
+            }
+            Err(e) => tracing::warn!(error = %e, "disk replay buffer unavailable, using RAM"),
+        }
+    }
+    ReplayBuffer::new(secs, ring_bytes(cfg, secs) as usize)
 }
 
 pub fn spawn(
@@ -84,9 +118,9 @@ pub fn spawn(
     std::thread::Builder::new()
         .name("sink".into())
         .spawn(move || {
-            let secs = cfg.buffer_seconds();
             let mut sink = Sink {
-                ring: ReplayBuffer::new(secs, ring_bytes(&cfg, secs)),
+                ring: make_ring(&cfg),
+                ring_error: false,
                 video: None,
                 audio: Vec::new(),
                 pending: Vec::new(),
@@ -134,7 +168,7 @@ impl Sink {
             && p.key
             && let Some(path) = self.pending_recording.take()
         {
-            self.begin_recording(path, &[]);
+            self.begin_recording(path, None);
         }
         let mut failed = None;
         if let Some(rec) = self.recording.as_mut()
@@ -149,9 +183,16 @@ impl Sink {
                 .send(Event::Error(format!("recording stopped: {e}")));
             self.stop_recording();
         }
-        self.ring.push(p);
+        if let Err(e) = self.ring.push(p)
+            && !self.ring_error
+        {
+            let _ = self
+                .events
+                .send(Event::Error(format!("replay buffer: {e}")));
+            self.ring_error = true;
+        }
         self.buffer_bytes
-            .store(self.ring.bytes(), Ordering::Relaxed);
+            .store(self.ring.ram_bytes(), Ordering::Relaxed);
     }
 
     fn on_cmd(&mut self, cmd: SinkCmd, cfg: &ServiceConfig) {
@@ -172,7 +213,7 @@ impl Sink {
                     self.pending_recording = Some(path);
                     self.recording_flag.store(true, Ordering::SeqCst);
                 } else {
-                    self.begin_recording(path, &preroll);
+                    self.begin_recording(path, Some(preroll));
                 }
             }
             SinkCmd::StopRecording => {
@@ -205,7 +246,7 @@ impl Sink {
         }
     }
 
-    fn begin_recording(&mut self, path: PathBuf, preroll: &[Packet]) {
+    fn begin_recording(&mut self, path: PathBuf, preroll: Option<Snapshot>) {
         let Some(streams) = self.streams() else {
             let _ = self
                 .events
@@ -219,16 +260,21 @@ impl Sink {
             let file = File::create(&path).map_err(|e| e.to_string())?;
             let writer = Mp4Writer::new(BufWriter::with_capacity(1 << 20, file), streams)
                 .map_err(|e| e.to_string())?;
-            let origin = preroll.first().map_or_else(now_ticks, |p| p.pts);
+            let origin = preroll
+                .as_ref()
+                .and_then(Snapshot::first_pts)
+                .unwrap_or_else(now_ticks);
             let mut rec = Recording {
                 writer,
                 path: path.clone(),
                 origin,
-                started_at: origin,
                 markers: Vec::new(),
             };
-            for p in preroll {
-                rec.writer.write(p).map_err(|e| e.to_string())?;
+            if let Some(pre) = &preroll {
+                for p in pre.packets() {
+                    let p = p.map_err(|e| e.to_string())?;
+                    rec.writer.write(&p).map_err(|e| e.to_string())?;
+                }
             }
             Ok(rec)
         })();
@@ -252,7 +298,6 @@ impl Sink {
             return;
         };
         let seconds = rec.writer.video_duration_ticks() as f64 / TIMEBASE as f64;
-        let _ = rec.started_at;
         match rec.writer.finish() {
             Ok(_) => {
                 write_markers(&rec.path, &rec.markers);
@@ -284,19 +329,14 @@ impl Sink {
                 continue;
             };
             let end = save.requested_at;
-            let packets: Vec<Packet> = self
-                .ring
-                .snapshot(save.seconds)
-                .into_iter()
-                .filter(|p| p.pts <= end)
-                .collect();
-            if packets.is_empty() {
+            let mut packets = self.ring.snapshot(save.seconds);
+            packets.truncate_after(end);
+            let Some(start) = packets.first_pts() else {
                 let _ = self
                     .events
                     .send(Event::Error("replay buffer is empty".into()));
                 continue;
-            }
-            let start = packets[0].pts;
+            };
             let markers: Vec<f64> = self
                 .markers
                 .iter()
@@ -326,7 +366,7 @@ impl Sink {
     }
 }
 
-fn write_clip(path: &Path, streams: StreamSet, packets: &[Packet]) -> Result<f64, String> {
+fn write_clip(path: &Path, streams: StreamSet, packets: &Snapshot) -> Result<f64, String> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
@@ -334,8 +374,9 @@ fn write_clip(path: &Path, streams: StreamSet, packets: &[Packet]) -> Result<f64
     let file = File::create(&part).map_err(|e| e.to_string())?;
     let mut w = Mp4Writer::new(BufWriter::with_capacity(1 << 20, file), streams)
         .map_err(|e| e.to_string())?;
-    for p in packets {
-        w.write(p).map_err(|e| e.to_string())?;
+    for p in packets.packets() {
+        let p = p.map_err(|e| e.to_string())?;
+        w.write(&p).map_err(|e| e.to_string())?;
     }
     let seconds = w.video_duration_ticks() as f64 / TIMEBASE as f64;
     w.finish().map_err(|e| e.to_string())?;

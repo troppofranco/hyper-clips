@@ -9,9 +9,14 @@
 //!   aligning mixer.
 
 pub mod audio;
+pub mod compose;
 pub mod convert;
+pub mod cursor;
 pub mod desktop;
+pub mod dsp;
 pub mod screenshot;
+pub mod webcam;
+pub mod window;
 
 #[derive(Debug, thiserror::Error)]
 pub enum CaptureError {

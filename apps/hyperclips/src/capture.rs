@@ -5,10 +5,11 @@ use std::path::PathBuf;
 
 use crossbeam_channel::{Receiver, Sender, unbounded};
 use hc_capture::desktop::MonitorSelect;
-use hc_core::config::{Config, MonitorChoice, ScreenshotFormat};
+use hc_capture::screenshot::ImageFormat;
+use hc_core::config::{CaptureMode, Config, MonitorChoice, ScreenshotFormat};
 use hc_core::paths::AppPaths;
-use hc_detect::{Game, GameDb, sanitize_file_name};
-use hc_recorder::{CaptureService, Event, ServiceConfig, SinkCmd};
+use hc_detect::{Foreground, Game, GameDb, sanitize_file_name};
+use hc_recorder::{CaptureService, CaptureTarget, Event, ServiceConfig, SinkCmd};
 use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::PostMessageW;
 
@@ -19,7 +20,10 @@ const MIN_BUFFER_SECONDS: u32 = 3;
 
 pub struct CaptureCtl {
     service: Option<CaptureService>,
-    monitor: Option<MonitorSelect>,
+    target: Option<CaptureTarget>,
+    fg: Option<Foreground>,
+    sent_pid: Option<u32>,
+    tmp_dir: PathBuf,
     events_tx: Sender<Event>,
     pub events: Receiver<Event>,
     db: GameDb,
@@ -53,7 +57,10 @@ impl CaptureCtl {
             });
         Self {
             service: None,
-            monitor: None,
+            target: None,
+            fg: None,
+            sent_pid: None,
+            tmp_dir: paths.tmp_dir.clone(),
             events_tx: svc_tx,
             events: main_rx,
             db: GameDb::load(Some(&paths.config_dir.join("games.toml"))),
@@ -64,6 +71,12 @@ impl CaptureCtl {
 
     pub fn is_running(&self) -> bool {
         self.service.is_some()
+    }
+
+    /// Centre of the game window if the game is in the foreground right now.
+    pub fn game_in_front(&self) -> Option<(i32, i32)> {
+        let (_, now) = hc_detect::foreground()?;
+        (self.fg?.pid == now.pid).then_some(now.center)
     }
 
     pub fn buffer_bytes(&self) -> usize {
@@ -78,20 +91,24 @@ impl CaptureCtl {
             .is_some_and(CaptureService::is_recording)
     }
 
-    /// Start (or restart) capture on the right monitor.
+    /// Start (or restart) capture on the right target.
     pub fn start(&mut self, config: &Config) -> Result<(), String> {
         self.service = None;
-        let monitor = self.wanted_monitor(config);
+        let target = self.wanted_target(config);
         let cfg = ServiceConfig {
             capture: config.capture.clone(),
             audio: config.audio.clone(),
-            monitor,
+            webcam: config.webcam.clone(),
+            target,
+            game_pid: self.fg.map(|f| f.pid),
+            tmp_dir: self.tmp_dir.clone(),
             min_buffer_seconds: MIN_BUFFER_SECONDS,
         };
         match CaptureService::start(cfg, self.events_tx.clone()) {
             Ok(s) => {
                 self.service = Some(s);
-                self.monitor = Some(monitor);
+                self.target = Some(target);
+                self.sent_pid = self.fg.map(|f| f.pid);
                 Ok(())
             }
             Err(e) => {
@@ -105,7 +122,7 @@ impl CaptureCtl {
         if self.service.take().is_some() {
             tracing::info!("capture stopped");
         }
-        self.monitor = None;
+        self.target = None;
     }
 
     /// Start or stop the service so it matches the configuration.
@@ -121,46 +138,91 @@ impl CaptureCtl {
         }
     }
 
-    fn wanted_monitor(&self, config: &Config) -> MonitorSelect {
-        match (config.capture.monitor, &self.game) {
-            (MonitorChoice::Game, Some(_)) => hc_detect::foreground()
-                .map_or(MonitorSelect::Primary, |(_, fg)| {
-                    MonitorSelect::Containing(fg.center.0, fg.center.1)
-                }),
+    fn wanted_target(&self, config: &Config) -> CaptureTarget {
+        let game_monitor = match (config.capture.monitor, self.fg) {
+            (MonitorChoice::Game, Some(fg)) => MonitorSelect::Containing(fg.center.0, fg.center.1),
             _ => MonitorSelect::Primary,
+        };
+        match config.capture.mode {
+            CaptureMode::Window => match self.fg {
+                Some(fg) if hc_capture::window::is_supported() => CaptureTarget::Window {
+                    hwnd: fg.hwnd,
+                    center: fg.center,
+                },
+                // No game window yet: capture the monitor until one shows up.
+                _ => CaptureTarget::Monitor {
+                    select: game_monitor,
+                    region: None,
+                },
+            },
+            CaptureMode::Region => match config.capture.region {
+                Some(r) => CaptureTarget::Monitor {
+                    select: MonitorSelect::Containing(
+                        r.x + r.width as i32 / 2,
+                        r.y + r.height as i32 / 2,
+                    ),
+                    region: Some((r.x, r.y, r.width, r.height)),
+                },
+                None => CaptureTarget::Monitor {
+                    select: game_monitor,
+                    region: None,
+                },
+            },
+            CaptureMode::Monitor => CaptureTarget::Monitor {
+                select: game_monitor,
+                region: None,
+            },
         }
     }
 
-    /// Periodic check: which game is in front, and is it on the captured monitor?
+    /// Periodic check: which game is in front, and does capture follow it?
     pub fn tick(&mut self, config: &Config) {
         let detected = self.db.detect();
-        let changed =
-            detected.as_ref().map(|(g, _)| &g.name) != self.game.as_ref().map(|g| &g.name);
-        if let Some((g, _)) = &detected {
-            if changed {
+        if let Some((g, fg)) = &detected {
+            if self.game.as_ref().map(|x| &x.name) != Some(&g.name) {
                 tracing::info!(game = %g.name, known = g.known, "game in foreground");
             }
             self.game = Some(g.clone());
+            self.fg = Some(*fg);
         }
-        // Follow the game to another monitor (only when idle, never mid-recording).
-        if config.capture.monitor == MonitorChoice::Game
-            && self.is_running()
-            && !self.is_recording()
-            && let Some((_, fg)) = detected
+        let Some(fg) = detected.map(|(_, fg)| fg) else {
+            return;
+        };
+        // Per-process audio follows the game without restarting video.
+        if self.sent_pid != Some(fg.pid)
+            && let Some(s) = &self.service
         {
-            let want = MonitorSelect::Containing(fg.center.0, fg.center.1);
-            let same = match (self.monitor, hc_capture::desktop::select_output(want)) {
-                (Some(MonitorSelect::Containing(x, y)), Ok(o)) => o.contains(x, y),
-                (Some(MonitorSelect::Primary), Ok(o)) => o.is_primary(),
-                _ => true,
-            };
-            if !same {
-                tracing::info!("game moved to another monitor, restarting capture");
-                let _ = self.start(config);
-            }
+            s.set_game_pid(Some(fg.pid));
+            self.sent_pid = Some(fg.pid);
+        }
+        if !self.is_running() || self.is_recording() {
+            return;
+        }
+        // Restart video only when the target really changed (never mid-recording).
+        let want = self.wanted_target(config);
+        let restart = match (self.target, want) {
+            (
+                Some(CaptureTarget::Window { hwnd: a, .. }),
+                CaptureTarget::Window { hwnd: b, .. },
+            ) => a != b,
+            (
+                Some(CaptureTarget::Monitor {
+                    select: a,
+                    region: ra,
+                }),
+                CaptureTarget::Monitor {
+                    select: b,
+                    region: rb,
+                },
+            ) => ra != rb || !same_monitor(a, b),
+            (Some(_), _) => true,
+            (None, _) => false,
+        };
+        if restart {
+            tracing::info!("capture target changed (game window/monitor), restarting capture");
+            let _ = self.start(config);
         }
     }
-
     fn base_name(&self) -> (String, String) {
         let game = self
             .game
@@ -225,14 +287,17 @@ impl CaptureCtl {
             self.start(config)?;
         }
         let (game, name) = self.base_name();
-        let jpeg = config.capture.screenshot_format == ScreenshotFormat::Jpg;
-        let ext = if jpeg { "jpg" } else { "png" };
+        let format = match config.capture.screenshot_format {
+            ScreenshotFormat::Png => ImageFormat::Png,
+            ScreenshotFormat::Jpg => ImageFormat::Jpeg,
+            ScreenshotFormat::Webp => ImageFormat::Webp,
+        };
         let path = Self::clips_root(config, paths)
             .join(&game)
             .join("Screenshots")
-            .join(format!("{name}.{ext}"));
+            .join(format!("{name}.{}", format.extension()));
         if let Some(s) = &self.service {
-            s.screenshot(path, jpeg);
+            s.screenshot(path, format);
         }
         Ok(())
     }
@@ -241,5 +306,15 @@ impl CaptureCtl {
         if let Some(s) = &self.service {
             s.command(SinkCmd::SetReplaySeconds(seconds));
         }
+    }
+}
+
+fn same_monitor(a: MonitorSelect, b: MonitorSelect) -> bool {
+    match (
+        hc_capture::desktop::select_output(a),
+        hc_capture::desktop::select_output(b),
+    ) {
+        (Ok(x), Ok(y)) => x.device_name == y.device_name,
+        _ => true,
     }
 }

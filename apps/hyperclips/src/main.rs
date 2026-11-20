@@ -8,6 +8,7 @@ mod capture;
 mod cli;
 mod core_app;
 mod ipc_server;
+mod overlay;
 mod studio;
 mod tray;
 

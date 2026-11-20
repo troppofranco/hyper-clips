@@ -21,6 +21,13 @@ use windows::Win32::System::Threading::{
 };
 
 fn main() -> ExitCode {
+    // Same DPI mode as the core (needed by DuplicateOutput1 / HDR capture).
+    // SAFETY: called before any window or DXGI object exists.
+    unsafe {
+        let _ = windows::Win32::UI::HiDpi::SetProcessDpiAwarenessContext(
+            windows::Win32::UI::HiDpi::DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
+        );
+    }
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("sample") if args.len() >= 2 => {
@@ -35,6 +42,8 @@ fn main() -> ExitCode {
         Some("dd-diag") => media::dd_diag(),
         Some("spike-pipeline") => media::spike_pipeline(args.get(1).map(String::as_str)),
         Some("probe") if args.len() >= 2 => media::probe(&args[1]),
+        Some("levels") if args.len() >= 2 => media::levels(&args[1]),
+        Some("audio-sessions") => media::audio_sessions(),
         Some("frame") if args.len() >= 3 => {
             let at = args
                 .get(3)
@@ -44,7 +53,7 @@ fn main() -> ExitCode {
         }
         Some("service-test") if args.len() >= 3 => {
             let secs = args[1].parse().unwrap_or(5);
-            media::service_test(secs, &args[2], args.iter().any(|a| a == "--mic"))
+            media::service_test(secs, &args[2], &args[3..])
         }
         Some("video-test") if args.len() >= 3 => {
             let secs = args[1].parse().unwrap_or(5);

@@ -94,3 +94,34 @@ settings-audio-system = Record system audio (game, music, chat)
 settings-audio-mic = Record microphone
 settings-volume = Volume (%)
 settings-audio-hint = With both sources on, clips contain a mixed track plus separate tracks for editing.
+
+## Settings — phase 2 completion
+settings-capture-mode = Capture
+mode-monitor = Whole monitor
+mode-window = Game window only
+mode-region = Region
+settings-region = Region (x, y, width, height)
+settings-show-cursor = Show mouse cursor
+settings-sdr-white = HDR → SDR paper white (nits)
+settings-buffer-storage = Replay buffer
+storage-auto = Automatic (disk above 2 min)
+storage-memory = RAM
+storage-disk = Disk
+settings-webcam = Webcam
+settings-webcam-enabled = Show webcam in recordings
+settings-webcam-device = Camera
+settings-webcam-size = Size (% of height)
+settings-position = Position
+pos-top-left = Top left
+pos-top-right = Top right
+pos-bottom-left = Bottom left
+pos-bottom-right = Bottom right
+settings-separate-tracks = Separate tracks for game, voice chat and other sounds
+settings-ptt = Push-to-talk key (empty = mic always on)
+settings-noise-gate = Noise gate
+settings-noise-gate-db = Threshold (dBFS)
+settings-noise-suppression = Noise suppression (RNNoise, local)
+settings-notifications = Notifications
+settings-notify-enabled = Show notifications
+settings-notify-in-game = Show over the game (never recorded)
+settings-notify-sound = Play a sound

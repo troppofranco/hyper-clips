@@ -8,15 +8,20 @@ use windows::Win32::Graphics::Direct3D11::{
     D3D11_USAGE_DEFAULT, D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11Multithread,
     ID3D11Texture2D,
 };
-use windows::Win32::Graphics::Dxgi::Common::DXGI_SAMPLE_DESC;
+use windows::Win32::Graphics::Dxgi::Common::{
+    DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020, DXGI_FORMAT, DXGI_FORMAT_B8G8R8A8_UNORM,
+    DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_SAMPLE_DESC,
+};
 use windows::Win32::Graphics::Dxgi::{
     CreateDXGIFactory1, DXGI_ADAPTER_FLAG_SOFTWARE, DXGI_ERROR_ACCESS_LOST,
-    DXGI_ERROR_INVALID_CALL, DXGI_ERROR_WAIT_TIMEOUT, DXGI_OUTDUPL_FRAME_INFO, IDXGIAdapter1,
-    IDXGIFactory1, IDXGIOutput1, IDXGIOutputDuplication, IDXGIResource,
+    DXGI_ERROR_INVALID_CALL, DXGI_ERROR_WAIT_TIMEOUT, DXGI_OUTDUPL_FRAME_INFO,
+    DXGI_OUTDUPL_POINTER_SHAPE_INFO, IDXGIAdapter1, IDXGIFactory1, IDXGIOutput1, IDXGIOutput5,
+    IDXGIOutput6, IDXGIOutputDuplication, IDXGIResource,
 };
 use windows::core::Interface;
 
 use crate::CaptureError;
+use crate::cursor::{CursorImage, shape_to_bgra};
 
 #[derive(Debug, Clone)]
 pub struct OutputInfo {
@@ -136,6 +141,19 @@ pub struct DesktopCapture {
     output: IDXGIOutput1,
     dupl: Option<IDXGIOutputDuplication>,
     frame: Option<ID3D11Texture2D>,
+    hdr: bool,
+    pointer: Pointer,
+}
+
+/// Mouse pointer as reported by Desktop Duplication (output coordinates).
+#[derive(Debug, Clone, Default)]
+pub struct Pointer {
+    pub visible: bool,
+    pub x: i32,
+    pub y: i32,
+    pub image: Option<std::sync::Arc<CursorImage>>,
+    /// Bumped whenever `image` changes.
+    pub version: u64,
 }
 
 impl DesktopCapture {
@@ -157,6 +175,8 @@ impl DesktopCapture {
             output,
             dupl: None,
             frame: None,
+            hdr: false,
+            pointer: Pointer::default(),
         };
         me.reopen()?;
         Ok(me)
@@ -164,14 +184,52 @@ impl DesktopCapture {
 
     fn reopen(&mut self) -> Result<(), CaptureError> {
         self.dupl = None;
+        // HDR desktops are duplicated as scRGB FP16 so highlights survive and
+        // can be tone-mapped; SDR desktops stay BGRA8.
         // SAFETY: device belongs to the output's adapter.
-        self.dupl = Some(unsafe { self.output.DuplicateOutput(&self.device)? });
+        unsafe {
+            self.hdr = self
+                .output
+                .cast::<IDXGIOutput6>()
+                .and_then(|o| o.GetDesc1())
+                .is_ok_and(|d| d.ColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020);
+            let formats: &[DXGI_FORMAT] = if self.hdr {
+                &[DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_FORMAT_B8G8R8A8_UNORM]
+            } else {
+                &[DXGI_FORMAT_B8G8R8A8_UNORM]
+            };
+            // DuplicateOutput1 requires a per-monitor-v2 DPI aware process;
+            // fall back to the legacy call (SDR only) otherwise.
+            let modern = self
+                .output
+                .cast::<IDXGIOutput5>()
+                .and_then(|o5| o5.DuplicateOutput1(&self.device, 0, formats));
+            let dupl = match modern {
+                Ok(d) => d,
+                Err(e) => {
+                    if self.hdr {
+                        tracing::warn!(error = %e, "HDR duplication unavailable, capturing as SDR");
+                    }
+                    self.hdr = false;
+                    self.output.DuplicateOutput(&self.device)?
+                }
+            };
+            self.dupl = Some(dupl);
+        }
         Ok(())
     }
 
-    /// Latest full desktop image (BGRA8), if any frame was captured yet.
+    /// Latest full desktop image (BGRA8, or FP16 scRGB when `is_hdr`).
     pub fn frame(&self) -> Option<&ID3D11Texture2D> {
         self.frame.as_ref()
+    }
+
+    pub fn is_hdr(&self) -> bool {
+        self.hdr
+    }
+
+    pub fn pointer(&self) -> &Pointer {
+        &self.pointer
     }
 
     /// Wait up to `timeout_ms` for a new desktop image and copy it into our
@@ -204,6 +262,32 @@ impl DesktopCapture {
             Err(e) => {
                 self.dupl = None;
                 return Err(e.into());
+            }
+        }
+        if info.LastMouseUpdateTime != 0 {
+            self.pointer.visible = info.PointerPosition.Visible.as_bool();
+            self.pointer.x = info.PointerPosition.Position.x;
+            self.pointer.y = info.PointerPosition.Position.y;
+        }
+        if info.PointerShapeBufferSize > 0 {
+            let mut buf = vec![0u8; info.PointerShapeBufferSize as usize];
+            let mut needed = 0u32;
+            let mut shape = DXGI_OUTDUPL_POINTER_SHAPE_INFO::default();
+            // SAFETY: buffer sized as DXGI requested.
+            let ok = unsafe {
+                dupl.GetFramePointerShape(
+                    buf.len() as u32,
+                    buf.as_mut_ptr().cast(),
+                    &mut needed,
+                    &mut shape,
+                )
+            };
+            if ok.is_ok()
+                && let Some(img) =
+                    shape_to_bgra(shape.Type, shape.Width, shape.Height, shape.Pitch, &buf)
+            {
+                self.pointer.image = Some(std::sync::Arc::new(img));
+                self.pointer.version += 1;
             }
         }
         // LastPresentTime == 0 means only the cursor moved; but always take the

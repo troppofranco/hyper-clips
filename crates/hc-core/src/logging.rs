@@ -53,7 +53,45 @@ pub fn init(log_dir: &Path, prefix: &str, level: LogLevel) -> std::io::Result<Lo
     Ok(LogGuard { _guard: guard })
 }
 
+static CRASH_FILE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// Log native access violations (not panics) with a backtrace to crash.log.
+/// Local file only; nothing is sent anywhere.
+fn install_native_crash_logger(crash_file: PathBuf) {
+    use windows::Win32::Foundation::EXCEPTION_ACCESS_VIOLATION;
+    use windows::Win32::System::Diagnostics::Debug::{
+        AddVectoredExceptionHandler, EXCEPTION_POINTERS,
+    };
+    unsafe extern "system" fn handler(info: *mut EXCEPTION_POINTERS) -> i32 {
+        // SAFETY: the OS passes a valid EXCEPTION_POINTERS for the duration of the call.
+        let rec = unsafe { info.as_ref().and_then(|i| i.ExceptionRecord.as_ref()) };
+        if let Some(rec) = rec
+            && rec.ExceptionCode == EXCEPTION_ACCESS_VIOLATION
+            && let Some(path) = CRASH_FILE.get()
+            && let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path)
+        {
+            let bt = std::backtrace::Backtrace::force_capture();
+            let _ = writeln!(
+                f,
+                "[{} v{}] access violation at {:?}\n{bt}",
+                unix_time(),
+                crate::VERSION,
+                rec.ExceptionAddress
+            );
+        }
+        0 // EXCEPTION_CONTINUE_SEARCH
+    }
+    let _ = CRASH_FILE.set(crash_file);
+    // SAFETY: registering a handler with static lifetime.
+    unsafe {
+        AddVectoredExceptionHandler(0, Some(handler));
+    }
+}
+
 fn install_panic_hook(crash_file: PathBuf) {
+    if std::env::var_os("HC_NATIVE_CRASH_LOG").is_some() {
+        install_native_crash_logger(crash_file.clone());
+    }
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         let location = info

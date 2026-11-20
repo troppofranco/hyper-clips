@@ -21,6 +21,8 @@ use crate::CaptureError;
 pub enum ImageFormat {
     Png,
     Jpeg,
+    /// Lossless WebP (pure-Rust encoder: WIC has no WebP encoder).
+    Webp,
 }
 
 impl ImageFormat {
@@ -28,6 +30,7 @@ impl ImageFormat {
         match self {
             ImageFormat::Png => "png",
             ImageFormat::Jpeg => "jpg",
+            ImageFormat::Webp => "webp",
         }
     }
 }
@@ -41,6 +44,9 @@ pub fn save_pixels(
     path: &Path,
     format: ImageFormat,
 ) -> Result<(), CaptureError> {
+    if format == ImageFormat::Webp {
+        return save_webp(width, height, stride, pixels, path);
+    }
     // SAFETY: WIC objects are ref-counted; pixel slice outlives the calls.
     unsafe {
         let factory: IWICImagingFactory =
@@ -56,7 +62,7 @@ pub fn save_pixels(
         stream.InitializeFromFilename(&HSTRING::from(path.as_os_str()), GENERIC_WRITE.0)?;
         let container = match format {
             ImageFormat::Png => GUID_ContainerFormatPng,
-            ImageFormat::Jpeg => GUID_ContainerFormatJpeg,
+            ImageFormat::Jpeg | ImageFormat::Webp => GUID_ContainerFormatJpeg,
         };
         let encoder = factory.CreateEncoder(&container, std::ptr::null())?;
         encoder.Initialize(&stream, WICBitmapEncoderNoCache)?;
@@ -104,4 +110,42 @@ pub fn save(
         (desc, mapped.RowPitch, pixels)
     };
     save_pixels(desc.Width, desc.Height, pitch, &pixels, path, format)
+}
+
+fn save_webp(
+    width: u32,
+    height: u32,
+    stride: u32,
+    pixels: &[u8],
+    path: &Path,
+) -> Result<(), CaptureError> {
+    let mut rgb = Vec::with_capacity((width * height * 3) as usize);
+    for y in 0..height as usize {
+        let row = pixels
+            .get(y * stride as usize..y * stride as usize + width as usize * 4)
+            .ok_or_else(|| CaptureError::Other("short pixel buffer".into()))?;
+        for px in row.as_chunks::<4>().0 {
+            rgb.extend_from_slice(&[px[2], px[1], px[0]]);
+        }
+    }
+    let file = std::fs::File::create(path).map_err(|e| CaptureError::Other(e.to_string()))?;
+    image_webp::WebPEncoder::new(std::io::BufWriter::new(file))
+        .encode(&rgb, width, height, image_webp::ColorType::Rgb8)
+        .map_err(|e| CaptureError::Other(format!("webp: {e}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn writes_webp() {
+        let path = std::env::temp_dir().join(format!("hc-test-{}.webp", std::process::id()));
+        let px: Vec<u8> = (0..16 * 8).flat_map(|i| [i as u8, 0, 255, 255]).collect();
+        save_pixels(16, 8, 64, &px, &path, ImageFormat::Webp).unwrap();
+        let bytes = std::fs::read(&path).unwrap();
+        assert_eq!(&bytes[0..4], b"RIFF");
+        assert_eq!(&bytes[8..12], b"WEBP");
+        std::fs::remove_file(path).unwrap();
+    }
 }

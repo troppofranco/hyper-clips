@@ -94,3 +94,34 @@ settings-audio-system = Registra l'audio di sistema (gioco, musica, chat)
 settings-audio-mic = Registra il microfono
 settings-volume = Volume (%)
 settings-audio-hint = Con entrambe le sorgenti attive le clip contengono una traccia mixata più tracce separate per l'editing.
+
+## Impostazioni — completamento fase 2
+settings-capture-mode = Cattura
+mode-monitor = Monitor intero
+mode-window = Solo la finestra del gioco
+mode-region = Regione
+settings-region = Regione (x, y, larghezza, altezza)
+settings-show-cursor = Mostra il cursore del mouse
+settings-sdr-white = Bianco di riferimento HDR → SDR (nit)
+settings-buffer-storage = Buffer del replay
+storage-auto = Automatico (disco oltre 2 min)
+storage-memory = RAM
+storage-disk = Disco
+settings-webcam = Webcam
+settings-webcam-enabled = Mostra la webcam nelle registrazioni
+settings-webcam-device = Videocamera
+settings-webcam-size = Dimensione (% dell'altezza)
+settings-position = Posizione
+pos-top-left = In alto a sinistra
+pos-top-right = In alto a destra
+pos-bottom-left = In basso a sinistra
+pos-bottom-right = In basso a destra
+settings-separate-tracks = Tracce separate per gioco, chat vocale e altri suoni
+settings-ptt = Tasto push-to-talk (vuoto = microfono sempre attivo)
+settings-noise-gate = Noise gate
+settings-noise-gate-db = Soglia (dBFS)
+settings-noise-suppression = Soppressione del rumore (RNNoise, locale)
+settings-notifications = Notifiche
+settings-notify-enabled = Mostra le notifiche
+settings-notify-in-game = Mostra sopra il gioco (mai registrate)
+settings-notify-sound = Riproduci un suono

@@ -3,8 +3,9 @@
 
 use eframe::egui;
 use hc_core::config::{
-    Codec, Config, Hotkeys, MonitorChoice, REPLAY_MAX_SECS, REPLAY_MIN_SECS, RateControl,
-    ScreenshotFormat, Theme, UpdateChannel, UpdateCheck,
+    BufferStorage, CaptureMode, Codec, Config, Hotkeys, MonitorChoice, OverlayPosition,
+    REPLAY_MAX_SECS, REPLAY_MIN_SECS, RateControl, Region, ScreenshotFormat, Theme, UpdateChannel,
+    UpdateCheck,
 };
 use hc_core::i18n::{Localizer, available_languages};
 use hc_core::ipc::{HotkeyConflict, Request, Response};
@@ -20,6 +21,7 @@ pub struct SettingsPage {
     draft: Config,
     message: Option<(bool, String)>,
     conflicts: Vec<HotkeyConflict>,
+    cameras: Vec<String>,
 }
 
 /// Per-action validation result for the hotkey editor (empty = valid).
@@ -44,6 +46,7 @@ impl SettingsPage {
             draft: config,
             message: None,
             conflicts: Vec::new(),
+            cameras: hc_capture::webcam::list_cameras(),
         }
     }
 
@@ -255,6 +258,126 @@ impl SettingsPage {
                 });
             ui.small(i.tr("settings-audio-hint"));
         });
+        self.advanced(ui, i);
+    }
+
+    /// Capture mode, cursor, HDR, buffer storage, webcam, mic DSP, notifications.
+    fn advanced(&mut self, ui: &mut egui::Ui, i: &Localizer) {
+        let d = &mut self.draft;
+        section(ui, &i.tr("settings-capture-mode"), |ui| {
+            egui::Grid::new("capture-adv")
+                .num_columns(2)
+                .spacing([16.0, 8.0])
+                .show(ui, |ui| {
+                    let c = &mut d.capture;
+                    ui.label(i.tr("settings-capture-mode"));
+                    ui.horizontal(|ui| {
+                        ui.radio_value(&mut c.mode, CaptureMode::Monitor, i.tr("mode-monitor"));
+                        ui.radio_value(&mut c.mode, CaptureMode::Window, i.tr("mode-window"));
+                        ui.radio_value(&mut c.mode, CaptureMode::Region, i.tr("mode-region"));
+                    });
+                    ui.end_row();
+                    if c.mode == CaptureMode::Region {
+                        let r = c.region.get_or_insert(Region {
+                            x: 0,
+                            y: 0,
+                            width: 1280,
+                            height: 720,
+                        });
+                        ui.label(i.tr("settings-region"));
+                        ui.horizontal(|ui| {
+                            ui.add(egui::DragValue::new(&mut r.x).prefix("x "));
+                            ui.add(egui::DragValue::new(&mut r.y).prefix("y "));
+                            ui.add(
+                                egui::DragValue::new(&mut r.width)
+                                    .range(16..=16384)
+                                    .prefix("w "),
+                            );
+                            ui.add(
+                                egui::DragValue::new(&mut r.height)
+                                    .range(16..=16384)
+                                    .prefix("h "),
+                            );
+                        });
+                        ui.end_row();
+                    }
+                    ui.label(i.tr("settings-show-cursor"));
+                    ui.checkbox(&mut c.show_cursor, "");
+                    ui.end_row();
+                    ui.label(i.tr("settings-sdr-white"));
+                    ui.add(egui::Slider::new(&mut c.sdr_white_nits, 80..=1000));
+                    ui.end_row();
+                    ui.label(i.tr("settings-buffer-storage"));
+                    ui.horizontal(|ui| {
+                        ui.radio_value(
+                            &mut c.buffer_storage,
+                            BufferStorage::Auto,
+                            i.tr("storage-auto"),
+                        );
+                        ui.radio_value(
+                            &mut c.buffer_storage,
+                            BufferStorage::Memory,
+                            i.tr("storage-memory"),
+                        );
+                        ui.radio_value(
+                            &mut c.buffer_storage,
+                            BufferStorage::Disk,
+                            i.tr("storage-disk"),
+                        );
+                    });
+                    ui.end_row();
+                    ui.label(i.tr("settings-screenshot-format"));
+                    ui.radio_value(&mut c.screenshot_format, ScreenshotFormat::Webp, "WebP");
+                    ui.end_row();
+                });
+        });
+        section(ui, &i.tr("settings-audio"), |ui| {
+            let a = &mut d.audio;
+            ui.checkbox(&mut a.separate_tracks, i.tr("settings-separate-tracks"));
+            ui.horizontal(|ui| {
+                ui.label(i.tr("settings-ptt"));
+                ui.add(egui::TextEdit::singleline(&mut a.push_to_talk).desired_width(140.0));
+            });
+            ui.horizontal(|ui| {
+                ui.checkbox(&mut a.noise_gate, i.tr("settings-noise-gate"));
+                ui.add_enabled(
+                    a.noise_gate,
+                    egui::Slider::new(&mut a.noise_gate_db, -90..=0)
+                        .text(i.tr("settings-noise-gate-db")),
+                );
+            });
+            ui.checkbox(&mut a.noise_suppression, i.tr("settings-noise-suppression"));
+        });
+        section(ui, &i.tr("settings-webcam"), |ui| {
+            let w = &mut d.webcam;
+            ui.checkbox(&mut w.enabled, i.tr("settings-webcam-enabled"));
+            ui.add_enabled_ui(w.enabled, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(i.tr("settings-webcam-device"));
+                    let shown = w.device.clone().unwrap_or_else(|| "—".into());
+                    egui::ComboBox::from_id_salt("cam")
+                        .selected_text(shown)
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut w.device, None, "—");
+                            for name in &self.cameras {
+                                ui.selectable_value(&mut w.device, Some(name.clone()), name);
+                            }
+                        });
+                });
+                ui.add(
+                    egui::Slider::new(&mut w.size_percent, 5..=60)
+                        .text(i.tr("settings-webcam-size")),
+                );
+                position_picker(ui, i, &mut w.position);
+            });
+        });
+        section(ui, &i.tr("settings-notifications"), |ui| {
+            let n = &mut d.notifications;
+            ui.checkbox(&mut n.enabled, i.tr("settings-notify-enabled"));
+            ui.checkbox(&mut n.in_game, i.tr("settings-notify-in-game"));
+            ui.checkbox(&mut n.sound, i.tr("settings-notify-sound"));
+            position_picker(ui, i, &mut n.position);
+        });
     }
 
     fn hotkeys(&mut self, ui: &mut egui::Ui, i: &Localizer, problems: &[(&str, String)]) {
@@ -364,6 +487,20 @@ fn section(ui: &mut egui::Ui, title: &str, body: impl FnOnce(&mut egui::Ui)) {
     egui::Frame::group(ui.style()).show(ui, |ui| {
         ui.set_width(ui.available_width());
         body(ui);
+    });
+}
+
+fn position_picker(ui: &mut egui::Ui, i: &Localizer, p: &mut OverlayPosition) {
+    ui.horizontal(|ui| {
+        ui.label(i.tr("settings-position"));
+        for (v, key) in [
+            (OverlayPosition::TopLeft, "pos-top-left"),
+            (OverlayPosition::TopRight, "pos-top-right"),
+            (OverlayPosition::BottomLeft, "pos-bottom-left"),
+            (OverlayPosition::BottomRight, "pos-bottom-right"),
+        ] {
+            ui.radio_value(p, v, i.tr(key));
+        }
     });
 }
 
