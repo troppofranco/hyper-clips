@@ -68,7 +68,10 @@ fn install_native_crash_logger(crash_file: PathBuf) {
         if let Some(rec) = rec
             && rec.ExceptionCode == EXCEPTION_ACCESS_VIOLATION
             && let Some(path) = CRASH_FILE.get()
-            && let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path)
+            && let Ok(mut f) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)
         {
             let bt = std::backtrace::Backtrace::force_capture();
             let _ = writeln!(
