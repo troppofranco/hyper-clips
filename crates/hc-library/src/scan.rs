@@ -233,7 +233,9 @@ mod tests {
         );
         std::fs::remove_file(&img).unwrap();
         assert_eq!(
-            scan_folders(&lib, std::slice::from_ref(&dir), &thumbs).unwrap().removed,
+            scan_folders(&lib, std::slice::from_ref(&dir), &thumbs)
+                .unwrap()
+                .removed,
             1
         );
         std::fs::remove_dir_all(dir).unwrap();

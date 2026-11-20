@@ -120,3 +120,17 @@ Studio idle (settings page reachable): 73.6 MB working set.
 off separate tracks saves ~29 MB. Phase 7 work: native NVENC/AMF without
 the MFT layer, sharing one WASAPI activation for the process-loopback
 sources, lazy compositor.
+
+## Phase 3 — 2026-11-20 (library)
+
+`hc-bench fake-library` with 1,000 items (thumbnails 256×144):
+
+| Studio state | Working set | Private | CPU |
+|---|---|---|---|
+| Library open, idle | 89.2 MB | 91.5 MB | 0.02 % |
+| After scrolling the whole gallery | 90.4 MB | 136.8 MB | 0.04 % |
+| Player open (1080p clip) | ~165 MB | — | — |
+
+Thumbnails are decoded only for visible cards (max 12 per frame) and kept
+in an LRU of 300 textures. The player's D3D11 device and Media Engine exist
+only while a clip is open (+~70 MB), and are released when it is closed.

@@ -4,6 +4,12 @@ Formato: [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) · Versioni: [
 
 ## [Unreleased]
 
+### Fase 3 — Libreria e player
+- `hc-library`: indice SQLite locale (WAL) con tag, preferiti, note, marker, rinomina del file, eliminazione nel Cestino, limite di spazio con auto-eliminazione delle clip non preferite più vecchie, cartelle aggiuntive, scansione e riconciliazione, raggruppamento per gioco o per sessione.
+- Miniature JPEG generate in locale (Media Foundation per i video, WIC per le immagini) nella cache dell'app.
+- Il core indicizza in background ogni clip, registrazione e screenshot salvato; `hyperclips.exe --list` legge la libreria anche a core spento.
+- Studio: galleria con ricerca, filtri (gioco, tag, tipo, preferiti), ordinamenti, raggruppamenti; pannello di dettaglio con player (MF Media Engine: decodifica hardware, audio, seek), marker sulla timeline, modifica di titolo, tag, note e preferito; "Mostra in Esplora file", "Copia negli appunti" (incolla su Discord), "Apri", "Elimina".
+- Correzione: il server IPC tiene sempre pronta un'istanza della pipe (prima, due comandi CLI ravvicinati potevano fallire).
 ### Fase 2 — Completamento
 - Cattura **finestra del gioco** (Windows Graphics Capture) e **regione** (ritaglio con letterbox); la cattura segue il gioco su finestra e monitor.
 - **Cursore** composto nel video (Desktop Duplication non lo include); **HDR**: duplicazione in FP16 e tone-mapping verso SDR con shader D3D11.

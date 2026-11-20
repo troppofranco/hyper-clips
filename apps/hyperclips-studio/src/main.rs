@@ -5,6 +5,8 @@
 
 mod app;
 mod core_link;
+mod library_page;
+mod player;
 mod settings;
 mod theme;
 

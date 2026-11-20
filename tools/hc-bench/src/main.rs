@@ -38,6 +38,9 @@ fn main() -> ExitCode {
             let secs = args.get(1).and_then(|s| s.parse().ok()).unwrap_or(5);
             spike_d3d11(secs)
         }
+        Some("fake-library") if args.len() >= 3 => {
+            media::fake_library(&args[1], args[2].parse().unwrap_or(1000))
+        }
         Some("encoders") => media::encoders(),
         Some("dd-diag") => media::dd_diag(),
         Some("spike-pipeline") => media::spike_pipeline(args.get(1).map(String::as_str)),

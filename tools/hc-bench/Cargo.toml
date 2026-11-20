@@ -12,6 +12,7 @@ publish.workspace = true
 hc-capture.workspace = true
 hc-core.workspace = true
 hc-encode.workspace = true
+hc-library.workspace = true
 hc-recorder.workspace = true
 crossbeam-channel.workspace = true
 

@@ -175,6 +175,31 @@ pub fn exclude_from_wer(exe_names: &[&str]) {
     }
 }
 
+/// Unix seconds → local "YYYY-MM-DD HH:MM".
+pub fn format_local(unix_secs: i64) -> String {
+    use windows::Win32::Foundation::{FILETIME, SYSTEMTIME};
+    use windows::Win32::System::Time::{FileTimeToSystemTime, SystemTimeToTzSpecificLocalTime};
+    let ft_val = (unix_secs.max(0) as u64 + 11_644_473_600) * 10_000_000;
+    let ft = FILETIME {
+        dwLowDateTime: ft_val as u32,
+        dwHighDateTime: (ft_val >> 32) as u32,
+    };
+    let mut utc = SYSTEMTIME::default();
+    let mut local = SYSTEMTIME::default();
+    // SAFETY: plain conversions on stack values.
+    unsafe {
+        if FileTimeToSystemTime(&ft, &mut utc).is_err()
+            || SystemTimeToTzSpecificLocalTime(None, &utc, &mut local).is_err()
+        {
+            return String::new();
+        }
+    }
+    format!(
+        "{:04}-{:02}-{:02} {:02}:{:02}",
+        local.wYear, local.wMonth, local.wDay, local.wHour, local.wMinute
+    )
+}
+
 /// Local time as `YYYY-MM-DD HH-MM-SS` (safe in file names).
 pub fn local_timestamp() -> String {
     use windows::Win32::System::SystemInformation::GetLocalTime;

@@ -5,6 +5,7 @@ use hc_core::paths::{AppPaths, InstallMode};
 use hc_core::sys;
 
 use crate::core_link::CoreLink;
+use crate::library_page::LibraryPage;
 use crate::settings::SettingsPage;
 use crate::theme;
 
@@ -21,6 +22,7 @@ pub struct StudioApp {
     i18n: Localizer,
     page: Page,
     settings: SettingsPage,
+    library: LibraryPage,
     core: CoreLink,
 }
 
@@ -30,6 +32,7 @@ impl StudioApp {
         let i18n = Localizer::new(&config.general.language, Some(&paths.exe_dir));
         Self {
             core: CoreLink::start(cc.egui_ctx.clone()),
+            library: LibraryPage::new(&paths, &config),
             settings: SettingsPage::new(config),
             page: Page::Library,
             i18n,
@@ -112,8 +115,8 @@ impl eframe::App for StudioApp {
             .show(ui, |ui| self.nav(ui));
         egui::CentralPanel::default().show(ui, |ui| match self.page {
             Page::Library => {
-                ui.heading(self.i18n.tr("nav-library"));
-                ui.label(self.i18n.tr("placeholder-library"));
+                let cfg = self.settings.saved().clone();
+                self.library.ui(ui, &self.i18n, &cfg);
             }
             Page::Editor => {
                 ui.heading(self.i18n.tr("nav-editor"));

@@ -1434,6 +1434,7 @@ dependencies = [
  "hc-capture",
  "hc-core",
  "hc-encode",
+ "hc-library",
  "hc-recorder",
  "windows",
 ]
@@ -1574,8 +1575,12 @@ dependencies = [
  "eframe",
  "hc-capture",
  "hc-core",
+ "hc-encode",
  "hc-hotkeys",
+ "hc-library",
  "tracing",
+ "windows",
+ "windows-core",
 ]
 
 [[package]]

@@ -50,6 +50,10 @@ impl SettingsPage {
         }
     }
 
+    pub fn saved(&self) -> &Config {
+        &self.saved
+    }
+
     /// Draw the page; returns the new config when it was saved.
     pub fn ui(
         &mut self,
@@ -370,6 +374,40 @@ impl SettingsPage {
                 );
                 position_picker(ui, i, &mut w.position);
             });
+        });
+        section(ui, &i.tr("settings-library"), |ui| {
+            let l = &mut d.library;
+            ui.horizontal(|ui| {
+                ui.label(i.tr("settings-quota"));
+                ui.add(
+                    egui::DragValue::new(&mut l.max_storage_gb)
+                        .range(0.0..=100_000.0)
+                        .speed(1.0),
+                );
+            });
+            ui.checkbox(&mut l.auto_delete, i.tr("settings-auto-delete"));
+            ui.label(i.tr("settings-extra-folders"));
+            let mut text = l
+                .extra_folders
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>()
+                .join("\n");
+            if ui
+                .add(
+                    egui::TextEdit::multiline(&mut text)
+                        .desired_rows(2)
+                        .desired_width(f32::INFINITY),
+                )
+                .changed()
+            {
+                l.extra_folders = text
+                    .lines()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(std::path::PathBuf::from)
+                    .collect();
+            }
         });
         section(ui, &i.tr("settings-notifications"), |ui| {
             let n = &mut d.notifications;

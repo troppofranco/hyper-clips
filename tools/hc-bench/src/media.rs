@@ -23,6 +23,57 @@ use hc_core::media::{Packet, StreamSet, TIMEBASE, VideoCodec, now_ticks};
 use hc_encode::mp4::Mp4Writer;
 use hc_encode::video::{Rate, VideoConfig, VideoEncoder, available_encoders};
 
+/// Fill a portable data folder with `n` synthetic library items (empty
+/// files + a shared thumbnail) to measure the studio at scale.
+pub fn fake_library(data_dir: &str, n: usize) -> ExitCode {
+    let data = Path::new(data_dir);
+    let clips = data.join("clips").join("Bench");
+    let thumbs = data.join("cache").join("thumbs");
+    let _ = std::fs::create_dir_all(&clips);
+    let _ = std::fs::create_dir_all(&thumbs);
+    let Some(src_thumb) = std::fs::read_dir(&thumbs)
+        .ok()
+        .and_then(|mut d| d.next())
+        .and_then(|e| e.ok())
+        .map(|e| e.path())
+    else {
+        eprintln!(
+            "need at least one existing thumbnail in {}",
+            thumbs.display()
+        );
+        return ExitCode::FAILURE;
+    };
+    let Ok(mut lib) = hc_library::Library::open(&data.join("library").join("library.db")) else {
+        return ExitCode::FAILURE;
+    };
+    for k in 0..n {
+        let p = clips.join(format!("Bench clip {k:04}.mp4"));
+        let _ = std::fs::write(&p, b"");
+        let item = hc_library::NewItem {
+            path: p,
+            kind: Some(hc_library::Kind::Clip),
+            game: Some(["CS2", "Rust", "Fortnite", "Minecraft"][k % 4].into()),
+            created_at: 1_790_000_000 + (k as i64) * 600,
+            duration_ms: 30_000 + (k as u64 % 90) * 1000,
+            size_bytes: 20_000_000,
+            width: 1920,
+            height: 1080,
+            codec: Some("H264".into()),
+            markers: vec![],
+        };
+        if let Ok(id) = lib.upsert(&item) {
+            let t = thumbs.join(format!("bench-{k}.jpg"));
+            let _ = std::fs::copy(&src_thumb, &t);
+            let _ = lib.set_thumb(id, &t);
+            if k % 10 == 0 {
+                let _ = lib.set_tags(id, &["bench".into()]);
+            }
+        }
+    }
+    println!("added {n} items");
+    ExitCode::SUCCESS
+}
+
 pub fn encoders() -> ExitCode {
     let out = match select_output(MonitorSelect::Primary) {
         Ok(o) => o,
