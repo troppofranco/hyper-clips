@@ -62,6 +62,7 @@ pub struct LibraryPage {
     detail: Option<Detail>,
     scan: Option<Receiver<Result<ScanReport, String>>>,
     toast: Option<(String, Instant)>,
+    edit_request: Option<(std::path::PathBuf, String)>,
 }
 
 impl LibraryPage {
@@ -87,6 +88,7 @@ impl LibraryPage {
             detail: None,
             scan: None,
             toast: None,
+            edit_request: None,
         };
         page.start_scan(paths, config);
         page
@@ -116,6 +118,11 @@ impl LibraryPage {
         if spawned.is_ok() {
             self.scan = Some(rx);
         }
+    }
+
+    /// A clip the user asked to open in the editor.
+    pub fn take_edit_request(&mut self) -> Option<(std::path::PathBuf, String)> {
+        self.edit_request.take()
     }
 
     fn reload(&mut self) {
@@ -610,6 +617,12 @@ impl LibraryPage {
         let mut toast = None;
         let mut deleted = false;
         ui.horizontal_wrapped(|ui| {
+            if item.kind != Kind::Screenshot && ui.button(i.tr("lib-edit")).clicked() {
+                if let Some(p) = &d.player {
+                    p.pause();
+                }
+                self.edit_request = Some((item.path.clone(), item.title.clone()));
+            }
             if ui.button(i.tr("lib-open-folder")).clicked() {
                 let _ = fsops::reveal_in_explorer(&item.path);
             }

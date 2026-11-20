@@ -134,3 +134,20 @@ sources, lazy compositor.
 Thumbnails are decoded only for visible cards (max 12 per frame) and kept
 in an LRU of 300 textures. The player's D3D11 device and Media Engine exist
 only while a clip is open (+~70 MB), and are released when it is closed.
+
+## Phase 4 — 2026-11-20 (export)
+
+`hc-bench export-test` on a 7 s 1080p60 clip, two segments (second at
+0.5×) with crossfade and a text overlay, RTX 5070:
+
+| Preset / format | Output | Time | Size |
+|---|---|---|---|
+| Discord (720p, target 10 MB) | 1280×720 H.264 + AAC | 1.1 s | 0.46 MB |
+| Shorts (9:16) | 1080×1920 H.264 + AAC | 1.8 s | 14.3 MB |
+| Target 1.5 MB at 12 Mbps start | 1920×1080 HEVC | 3.6 s (2 passes) | 1.18 MB |
+| WebM | 1280×720 AV1 (no audio) | 1.3 s | — |
+| GIF | 640×360, 150 frames | 3.8 s | 12.7 MB |
+| WebP (lossless) | 640×360 | 0.7 s | 30.1 MB |
+
+Animated WebP is lossless (no lossy encoder without libwebp), so files are
+large; GIF is usually the smaller choice.

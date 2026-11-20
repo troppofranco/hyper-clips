@@ -16,7 +16,7 @@ use windows::core::{Interface, PCSTR, s};
 use crate::CaptureError;
 
 const HLSL: &str = r#"
-cbuffer C : register(b0) { float4 rect; float4 params; };
+cbuffer C : register(b0) { float4 rect; float4 params; float4 uvr; };
 Texture2D tex : register(t0);
 SamplerState smp : register(s0);
 struct VO { float4 pos : SV_Position; float2 uv : TEXCOORD0; };
@@ -28,7 +28,7 @@ VO vs_main(uint id : SV_VertexID) {
     return o;
 }
 float4 ps_main(VO i) : SV_Target {
-    float4 c = tex.Sample(smp, i.uv);
+    float4 c = tex.Sample(smp, lerp(uvr.xy, uvr.zw, i.uv));
     if (params.x > 0.5) {
         // scRGB (linear BT.709, 1.0 = 80 nits) -> SDR: scale to paper white,
         // soft-knee roll-off on the max channel, then sRGB encode.
@@ -44,6 +44,7 @@ float4 ps_main(VO i) : SV_Target {
         float3 srgb = l <= 0.0031308 ? lo : hi;
         return float4(srgb, 1.0);
     }
+    if (params.w > 0.5) { c.a = 1.0; }
     return float4(c.rgb, c.a * params.z);
 }
 "#;
@@ -52,6 +53,8 @@ float4 ps_main(VO i) : SV_Target {
 pub enum DrawMode {
     /// Alpha-blended copy with extra opacity (0..=1).
     Blend { opacity: f32 },
+    /// Video frame: source alpha ignored (decoders leave it undefined).
+    Video { opacity: f32 },
     /// HDR scRGB → SDR. `scale` = 80 / SDR white level in nits.
     ToneMap { scale: f32 },
 }
@@ -60,6 +63,7 @@ pub enum DrawMode {
 struct Constants {
     rect: [f32; 4],
     params: [f32; 4],
+    uv: [f32; 4],
 }
 
 pub struct Compositor {
@@ -195,6 +199,27 @@ impl Compositor {
         dst: [f32; 4],
         mode: DrawMode,
     ) {
+        self.draw_uv(target, src, dst, [0.0, 0.0, 1.0, 1.0], mode);
+    }
+
+    /// Fill the whole target with opaque black.
+    pub fn clear(&self, target: &RenderTarget) {
+        // SAFETY: RTV belongs to this device.
+        unsafe {
+            self.context
+                .ClearRenderTargetView(&target.rtv, &[0.0, 0.0, 0.0, 1.0])
+        };
+    }
+
+    /// Like [`Self::draw`] but sampling only the normalised source rect `uv`.
+    pub fn draw_uv(
+        &self,
+        target: &RenderTarget,
+        src: &ID3D11ShaderResourceView,
+        dst: [f32; 4],
+        uv: [f32; 4],
+        mode: DrawMode,
+    ) {
         let (w, h) = (target.width as f32, target.height as f32);
         let ndc = [
             dst[0] / w * 2.0 - 1.0,
@@ -204,9 +229,14 @@ impl Compositor {
         ];
         let params = match mode {
             DrawMode::Blend { opacity } => [0.0, 1.0, opacity, 0.0],
+            DrawMode::Video { opacity } => [0.0, 1.0, opacity, 1.0],
             DrawMode::ToneMap { scale } => [1.0, scale, 1.0, 0.0],
         };
-        let c = Constants { rect: ndc, params };
+        let c = Constants {
+            rect: ndc,
+            params,
+            uv,
+        };
         let ctx = &self.context;
         // SAFETY: all bound objects belong to the same device and outlive the draw.
         unsafe {

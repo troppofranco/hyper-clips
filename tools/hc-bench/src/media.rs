@@ -74,6 +74,98 @@ pub fn fake_library(data_dir: &str, n: usize) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// Export two segments of `clip` with a crossfade, slow motion and a text
+/// overlay using `preset` (discord|shorts|webm|gif|webp|max).
+pub fn export_test(clip: &str, out: &str, preset: &str) -> ExitCode {
+    use hc_editor::*;
+    let path = std::path::PathBuf::from(clip);
+    let dur = hc_encode::probe::probe(&path)
+        .map(|r| (r.duration_ticks / 10_000) as u64)
+        .unwrap_or(0);
+    if dur < 3000 {
+        eprintln!("clip too short");
+        return ExitCode::FAILURE;
+    }
+    let mut p = Project::default();
+    p.segments.push(Segment {
+        in_ms: 0,
+        out_ms: dur / 2,
+        ..Segment::new(path.clone(), dur)
+    });
+    p.segments.push(Segment {
+        in_ms: dur / 2,
+        out_ms: dur,
+        speed: 0.5,
+        ..Segment::new(path, dur)
+    });
+    p.transition = Transition {
+        kind: TransitionKind::Crossfade,
+        duration_ms: 500,
+    };
+    p.overlays.push(Overlay {
+        kind: OverlayKind::Text {
+            text: "Hyper Clips\nGG".into(),
+            size: 0.07,
+            color: [255, 220, 40, 255],
+            outline: true,
+        },
+        start_ms: 0,
+        end_ms: 100_000,
+        x: 0.5,
+        y: 0.18,
+    });
+    let pr = match preset {
+        "discord" => Preset::Discord,
+        "shorts" => Preset::Shorts,
+        "gif" => Preset::Gif,
+        "webp" => Preset::WebP,
+        _ => Preset::MaxQuality,
+    };
+    pr.apply(&mut p.output, &mut p.framing);
+    if preset == "tiny" {
+        p.output.bitrate_kbps = 12_000;
+        p.output.target_size_mb = Some(1.5);
+    }
+    if preset == "webm" {
+        p.output.format = Format::WebM;
+        p.output.height = 720;
+    }
+    let cancel = std::sync::atomic::AtomicBool::new(false);
+    let t0 = Instant::now();
+    let mut last = 0;
+    let res = render::export(
+        &p,
+        Path::new(out),
+        &mut |f, pass| {
+            let pct = (f * 100.0) as u32;
+            if pct >= last + 25 {
+                println!("  pass {pass}: {pct}%");
+                last = pct;
+            }
+        },
+        &cancel,
+    );
+    match res {
+        Ok(r) => {
+            println!(
+                "exported {}x{} {:.1}s in {:.1}s, {:.2} MB, {} pass(es), encoder {}",
+                r.width,
+                r.height,
+                r.duration_ms as f64 / 1000.0,
+                t0.elapsed().as_secs_f64(),
+                r.bytes as f64 / 1_048_576.0,
+                r.passes,
+                r.encoder
+            );
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("export failed: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
 pub fn encoders() -> ExitCode {
     let out = match select_output(MonitorSelect::Primary) {
         Ok(o) => o,

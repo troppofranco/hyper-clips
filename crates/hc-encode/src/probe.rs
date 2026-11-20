@@ -70,7 +70,9 @@ pub fn decode_frame(path: &Path, at_ticks: i64) -> windows::core::Result<(u32, u
         }
         let s = last.ok_or_else(windows::core::Error::empty)?;
         let bytes = crate::mf::sample_bytes(&s)?;
-        Ok((w, h, w * 4, bytes))
+        // Rows may be padded (e.g. 1080 px wide): derive the real stride.
+        let stride = (bytes.len() / h.max(1) as usize) as u32;
+        Ok((w, h, stride.max(w * 4), bytes))
     }
 }
 

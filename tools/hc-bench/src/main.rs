@@ -41,6 +41,7 @@ fn main() -> ExitCode {
         Some("fake-library") if args.len() >= 3 => {
             media::fake_library(&args[1], args[2].parse().unwrap_or(1000))
         }
+        Some("export-test") if args.len() >= 4 => media::export_test(&args[1], &args[2], &args[3]),
         Some("encoders") => media::encoders(),
         Some("dd-diag") => media::dd_diag(),
         Some("spike-pipeline") => media::spike_pipeline(args.get(1).map(String::as_str)),

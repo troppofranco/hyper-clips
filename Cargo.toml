@@ -15,6 +15,7 @@ hc-core = { path = "crates/hc-core" }
 hc-buffer = { path = "crates/hc-buffer" }
 hc-capture = { path = "crates/hc-capture" }
 hc-detect = { path = "crates/hc-detect" }
+hc-editor = { path = "crates/hc-editor" }
 hc-encode = { path = "crates/hc-encode" }
 hc-hotkeys = { path = "crates/hc-hotkeys" }
 hc-library = { path = "crates/hc-library" }
@@ -24,6 +25,8 @@ clap = { version = "4.6.9", default-features = false, features = ["std", "derive
 crossbeam-channel = "0.5.17"
 eframe = { version = "0.37.0", default-features = false }
 fluent-bundle = "0.16.0"
+gif = "0.14.2"
+serde_json = "1.0.154"
 image-webp = "0.2.4"
 nnnoiseless = { version = "0.5.2", default-features = false }
 rusqlite = { version = "0.43.0", features = ["bundled"] }

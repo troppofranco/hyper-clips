@@ -4,6 +4,13 @@ Formato: [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) · Versioni: [
 
 ## [Unreleased]
 
+### Fase 4 — Editor ed export
+- `hc-editor`: progetto non distruttivo (JSON) con segmenti (inizio, fine, velocità 0,25–4x), taglio al cursore, riordino, transizioni (stacco, dissolvenza incrociata, dissolvenza al nero), inquadratura (originale, 16:9, 9:16, 1:1, zoom, spostamento), overlay di testo con contorno (GDI, nessun font remoto) e di immagini, sottotitoli .srt importabili, tracce audio con volume e muto, esportazione mixata o separata.
+- Motore di export su GPU: decodifica Media Foundation (DXVA), composizione D3D11, stessi encoder hardware della cattura. Formati: **MP4** (H.264/HEVC/AV1 + AAC), **WebM** (AV1, muxer Matroska proprio; senza audio perché manca un encoder Opus locale), **GIF**, **WebP animato** (lossless).
+- Preset Discord (10 MB), YouTube, Shorts/TikTok (9:16), Twitter/X, qualità massima, GIF, WebP.
+- **Ottimizzatore di dimensione**: nuova codifica con bitrate corretto finché il file rientra nel limite (fino a 3 passate; 10/25/50/500 MB a un clic).
+- **Coda di esportazione in background** in un processo worker separato a priorità ridotta, che continua anche a finestra chiusa; il risultato viene aggiunto alla libreria.
+- Studio: pagina Editor con anteprima (riquadro di crop e posizioni degli overlay), timeline dei segmenti e coda.
 ### Fase 3 — Libreria e player
 - `hc-library`: indice SQLite locale (WAL) con tag, preferiti, note, marker, rinomina del file, eliminazione nel Cestino, limite di spazio con auto-eliminazione delle clip non preferite più vecchie, cartelle aggiuntive, scansione e riconciliazione, raggruppamento per gioco o per sessione.
 - Miniature JPEG generate in locale (Media Foundation per i video, WIC per le immagini) nella cache dell'app.

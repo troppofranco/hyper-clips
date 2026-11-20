@@ -5,6 +5,7 @@ use hc_core::paths::{AppPaths, InstallMode};
 use hc_core::sys;
 
 use crate::core_link::CoreLink;
+use crate::editor_page::EditorPage;
 use crate::library_page::LibraryPage;
 use crate::settings::SettingsPage;
 use crate::theme;
@@ -23,6 +24,7 @@ pub struct StudioApp {
     page: Page,
     settings: SettingsPage,
     library: LibraryPage,
+    editor: EditorPage,
     core: CoreLink,
 }
 
@@ -33,6 +35,14 @@ impl StudioApp {
         Self {
             core: CoreLink::start(cc.egui_ctx.clone()),
             library: LibraryPage::new(&paths, &config),
+            editor: EditorPage::new(
+                &paths,
+                config
+                    .general
+                    .clips_dir
+                    .clone()
+                    .unwrap_or_else(|| paths.default_clips_dir.clone()),
+            ),
             settings: SettingsPage::new(config),
             page: Page::Library,
             i18n,
@@ -117,11 +127,12 @@ impl eframe::App for StudioApp {
             Page::Library => {
                 let cfg = self.settings.saved().clone();
                 self.library.ui(ui, &self.i18n, &cfg);
+                if let Some((path, title)) = self.library.take_edit_request() {
+                    self.editor.add_clip(&path, &title);
+                    self.page = Page::Editor;
+                }
             }
-            Page::Editor => {
-                ui.heading(self.i18n.tr("nav-editor"));
-                ui.label(self.i18n.tr("placeholder-editor"));
-            }
+            Page::Editor => self.editor.ui(ui, &self.i18n),
             Page::Settings => {
                 let outcome = self.settings.ui(ui, &self.i18n, &self.paths, &self.core);
                 if let Some(saved) = outcome {

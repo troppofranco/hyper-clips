@@ -5,6 +5,7 @@
 
 mod app;
 mod core_link;
+mod editor_page;
 mod library_page;
 mod player;
 mod settings;
@@ -19,6 +20,18 @@ use hc_core::sys::{find_processes, focus_process_window};
 use hc_core::{CORE_EXE, STUDIO_EXE};
 
 fn main() -> eframe::Result {
+    // Background export worker: no window, survives the studio.
+    let args: Vec<String> = std::env::args().collect();
+    if let Some(pos) = args.iter().position(|a| a == "--export-worker")
+        && let Some(dir) = args.get(pos + 1)
+    {
+        if let Ok(paths) = AppPaths::detect() {
+            let cfg = Config::load(&paths.config_file()).unwrap_or_default();
+            let _log = hc_core::logging::init(&paths.log_dir, "export", cfg.general.log_level).ok();
+            editor_page::run_worker(std::path::Path::new(dir));
+        }
+        return Ok(());
+    }
     // Single instance: focus the existing window instead of opening another.
     let me = std::process::id();
     if let Some(pid) = find_processes(STUDIO_EXE).into_iter().find(|p| *p != me) {

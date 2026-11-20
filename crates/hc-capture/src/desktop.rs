@@ -104,6 +104,15 @@ pub fn select_output(sel: MonitorSelect) -> Result<OutputInfo, CaptureError> {
         .ok_or(CaptureError::NoOutput)
 }
 
+/// LUID of the adapter at index (to pick encoders on the same GPU).
+pub fn adapter_luid(index: u32) -> Result<LUID, CaptureError> {
+    // SAFETY: DXGI enumeration.
+    unsafe {
+        let factory: IDXGIFactory1 = CreateDXGIFactory1()?;
+        Ok(factory.EnumAdapters1(index)?.GetDesc1()?.AdapterLuid)
+    }
+}
+
 /// Create a D3D11 device on a specific adapter, usable from several threads
 /// (Media Foundation encoders call into it from their own threads).
 pub fn create_device(

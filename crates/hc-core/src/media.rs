@@ -28,6 +28,8 @@ pub struct VideoInfo {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AudioRole {
+    /// Exported copy of source track N (editor).
+    Track(u8),
     /// System + microphone, the track players pick by default.
     Mix,
     /// Everything except the game (or the whole system without a game).
@@ -39,13 +41,14 @@ pub enum AudioRole {
 
 impl AudioRole {
     /// Track name written in the MP4 handler box (shown by players/editors).
-    pub fn label(self) -> &'static str {
+    pub fn label(self) -> String {
         match self {
-            AudioRole::Mix => "Mix",
-            AudioRole::System => "System",
-            AudioRole::Microphone => "Microphone",
-            AudioRole::Game => "Game",
-            AudioRole::Chat => "Chat",
+            AudioRole::Track(n) => format!("Track {n}"),
+            AudioRole::Mix => "Mix".into(),
+            AudioRole::System => "System".into(),
+            AudioRole::Microphone => "Microphone".into(),
+            AudioRole::Game => "Game".into(),
+            AudioRole::Chat => "Chat".into(),
         }
     }
 }
