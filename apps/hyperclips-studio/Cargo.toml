@@ -1,0 +1,30 @@
+[package]
+name = "hyperclips-studio"
+description = "Hyper Clips studio: library, editor and settings UI (started on demand)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "hyperclips-studio"
+path = "src/main.rs"
+
+[features]
+# OpenGL renderer: measured ~132 MB working set vs ~156-267 MB with wgpu
+# (see docs/BENCHMARKS.md). A custom Direct3D 11 painter is planned for
+# Phase 3, sharing the device used for hardware video decoding.
+default = ["glow"]
+glow = ["eframe/glow"]
+wgpu = ["eframe/wgpu"]
+
+[dependencies]
+eframe = { workspace = true, default-features = false, features = ["accesskit", "default_fonts"] }
+hc-core.workspace = true
+hc-hotkeys.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true
