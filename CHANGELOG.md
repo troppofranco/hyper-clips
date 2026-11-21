@@ -2,7 +2,7 @@
 
 Formato: [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) · Versioni: [SemVer](https://semver.org/lang/it/).
 
-## [Unreleased]
+## [0.2.1]
 
 ### Aggiornamenti
 - All'apertura dello studio compare un popup se su GitHub c'è una versione più recente: numero di versione, novità principali, link alla pagina della release e pulsanti "Apri su GitHub", "Più tardi" e "Salta questa versione". Rispetta le impostazioni (controllo disattivato, canale, versioni saltate).
