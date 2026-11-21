@@ -482,3 +482,10 @@ settings-api-docs = Documentazione dell'API
 settings-plugins-none = Nessun plugin installato. Apri la cartella dei plugin per aggiungerne uno.
 upd-check-hint = Contatta solo GitHub, senza inviare dati personali.
 upd-channel-hint = Beta riceve le novità prima, ma possono contenere errori.
+
+## Update pop-up
+pop-title = È disponibile un aggiornamento
+pop-versions = Versione { $new } · hai la { $current }
+pop-whats-new = Novità
+pop-download-hint = Scarica l'installer o lo zip portable dalla pagina della release:
+pop-open-github = Apri su GitHub

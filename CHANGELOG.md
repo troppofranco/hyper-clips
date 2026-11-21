@@ -2,6 +2,12 @@
 
 Formato: [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) · Versioni: [SemVer](https://semver.org/lang/it/).
 
+## [Unreleased]
+
+### Aggiornamenti
+- All'apertura dello studio compare un popup se su GitHub c'è una versione più recente: numero di versione, novità principali, link alla pagina della release e pulsanti "Apri su GitHub", "Più tardi" e "Salta questa versione". Rispetta le impostazioni (controllo disattivato, canale, versioni saltate).
+- Prima l'avviso arrivava solo come notifica di Windows e l'installazione andava avviata a mano da Impostazioni → Aggiornamenti.
+
 ## [0.2.0]
 
 ### Interfaccia rinnovata

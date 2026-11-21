@@ -31,6 +31,7 @@ hc-library.workspace = true
 hc-plugins.workspace = true
 hc-share.workspace = true
 hc-vault.workspace = true
+semver.workspace = true
 hc-updater.workspace = true
 windows-core.workspace = true
 tracing.workspace = true

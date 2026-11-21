@@ -41,6 +41,7 @@ pub struct StudioApp {
     disk: Option<(u64, u64)>,
     disk_at: Option<Instant>,
     notice: Option<(String, Instant)>,
+    update_popup: crate::update_popup::UpdatePopup,
 }
 
 fn clips_root(paths: &AppPaths, config: &Config) -> std::path::PathBuf {
@@ -66,6 +67,7 @@ impl StudioApp {
             editor: EditorPage::new(&paths, clips_root(&paths, &config)),
             vault: crate::vault_page::VaultPage::new(&paths, clips_root(&paths, &config)),
             privacy: crate::privacy_page::PrivacyPage::new(),
+            update_popup: crate::update_popup::UpdatePopup::start(&paths, &config),
             settings: SettingsPage::new(config, &paths),
             page,
             i18n,
@@ -429,6 +431,11 @@ impl eframe::App for StudioApp {
                 }
             });
         self.notice_toast(&ctx);
+        if let Some(crate::update_popup::PopupAction::Ignore(v)) =
+            self.update_popup.ui(&ctx, &self.i18n)
+        {
+            self.settings.ignore_version(&v, &self.paths);
+        }
     }
 }
 

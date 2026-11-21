@@ -1902,6 +1902,7 @@ dependencies = [
  "hc-share",
  "hc-updater",
  "hc-vault",
+ "semver",
  "tracing",
  "windows",
  "windows-core",

@@ -85,6 +85,14 @@ pub struct Release {
 }
 
 impl Release {
+    /// Public GitHub page of this release.
+    pub fn page_url(&self) -> String {
+        format!(
+            "https://github.com/{OWNER}/{REPO}/releases/tag/{}",
+            self.tag
+        )
+    }
+
     pub fn asset(&self, name: &str) -> Option<&Asset> {
         self.assets.iter().find(|a| a.name == name)
     }
@@ -200,6 +208,16 @@ pub fn pick_update(
 /// Check GitHub for an update.
 pub fn check(channel: Channel, ignored: &[String]) -> Result<Option<Release>> {
     let current = Version::parse(hc_core::VERSION).map_err(|e| UpdateError::Data(e.to_string()))?;
+    check_against(&current, channel, ignored)
+}
+
+/// Like [`check`], against an explicit current version.
+pub fn check_against(
+    current: &Version,
+    channel: Channel,
+    ignored: &[String],
+) -> Result<Option<Release>> {
+    let current = current.clone();
     Ok(pick_update(
         &fetch_releases(channel)?,
         &current,

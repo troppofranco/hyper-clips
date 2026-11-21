@@ -145,6 +145,18 @@ impl SettingsPage {
         &self.saved
     }
 
+    /// Remember that the user skipped `version` (saved immediately).
+    pub fn ignore_version(&mut self, version: &str, paths: &AppPaths) {
+        for cfg in [&mut self.saved, &mut self.draft] {
+            if !cfg.updates.ignored_versions.iter().any(|v| v == version) {
+                cfg.updates.ignored_versions.push(version.to_owned());
+            }
+        }
+        if let Err(e) = self.saved.save(&paths.config_file()) {
+            tracing::warn!(error = %e, "cannot save ignored version");
+        }
+    }
+
     pub fn open_category(&mut self, c: Category) {
         self.category = c;
     }

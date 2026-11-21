@@ -14,6 +14,7 @@ mod settings;
 mod settings_extra;
 mod share_ui;
 mod theme;
+mod update_popup;
 mod updates_ui;
 mod vault_page;
 mod widgets;
