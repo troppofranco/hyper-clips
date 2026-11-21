@@ -1,32 +1,32 @@
-//! Studio shell: sidebar navigation, top bar (capture status, search,
-//! quick share) and the pages.
+//! Studio shell, laid out after the user's sketch: a sidebar with the logo
+//! and three entries (Library, Editor, Settings), and a rounded top bar with
+//! search, the save-clip key, the replay length and the resolution.
 
 use std::time::{Duration, Instant};
 
 use eframe::egui::{self, Margin, RichText, Stroke, vec2};
 use hc_core::config::{Config, StartPage};
 use hc_core::i18n::Localizer;
-use hc_core::ipc::{Action, Request};
 use hc_core::paths::AppPaths;
 use hc_core::sys;
 
 use crate::core_link::CoreLink;
 use crate::editor_page::EditorPage;
 use crate::icons::Ic;
-use crate::library_page::{LibraryPage, View};
-use crate::settings::SettingsPage;
+use crate::library_page::LibraryPage;
+use crate::settings::{Category, SettingsPage};
 use crate::theme::{self, palette};
 use crate::widgets;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Page {
     Library,
-    Highlights,
     Editor,
-    Vault,
     Settings,
-    Privacy,
 }
+
+const REPLAY_CHOICES: [u32; 7] = [15, 30, 60, 120, 180, 300, 600];
+const HEIGHT_CHOICES: [u32; 5] = [720, 1080, 1440, 2160, 0];
 
 pub struct StudioApp {
     paths: AppPaths,
@@ -52,13 +52,28 @@ fn clips_root(paths: &AppPaths, config: &Config) -> std::path::PathBuf {
         .unwrap_or_else(|| paths.default_clips_dir.clone())
 }
 
+fn height_label(i: &Localizer, h: u32) -> String {
+    if h == 0 {
+        i.tr("cap-height-source")
+    } else {
+        format!("{h}p")
+    }
+}
+
+fn seconds_label(s: u32) -> String {
+    if s < 60 || !s.is_multiple_of(60) {
+        format!("{s}s")
+    } else {
+        format!("{} min", s / 60)
+    }
+}
+
 impl StudioApp {
     pub fn new(cc: &eframe::CreationContext<'_>, paths: AppPaths, config: Config) -> Self {
         theme::apply(&cc.egui_ctx, &config);
         let i18n = Localizer::new(&config.general.language, Some(&paths.exe_dir));
         let page = match config.appearance.start_page {
-            StartPage::Library => Page::Library,
-            StartPage::Highlights => Page::Highlights,
+            StartPage::Library | StartPage::Highlights => Page::Library,
             StartPage::Editor => Page::Editor,
         };
         Self {
@@ -78,68 +93,53 @@ impl StudioApp {
         }
     }
 
-    fn title(&self) -> String {
-        let key = match self.page {
-            Page::Library => "nav-library",
-            Page::Highlights => "nav-highlights",
-            Page::Editor => "nav-editor",
-            Page::Vault => "nav-vault",
-            Page::Settings => "nav-settings",
-            Page::Privacy => "nav-privacy",
-        };
-        self.i18n.tr(key)
-    }
-
     fn sidebar(&mut self, ui: &mut egui::Ui) {
         let p = palette(ui.ctx());
         self.sidebar_bottom(ui);
-        ui.add_space(14.0);
-        ui.horizontal(|ui| {
-            ui.add_space(6.0);
-            // Logo: accent rounded square with a play triangle.
-            let (r, _) = ui.allocate_exact_size(vec2(30.0, 30.0), egui::Sense::hover());
-            ui.painter().rect_filled(r, 8.0, p.accent);
-            crate::icons::paint(ui.painter(), r.shrink(8.0), Ic::Play, p.on_accent);
-            ui.label(RichText::new(hc_core::APP_NAME).size(19.0).strong());
-        });
         ui.add_space(18.0);
-        let pages = [
-            (Page::Library, Ic::Library, "nav-library"),
-            (Page::Highlights, Ic::Highlight, "nav-highlights"),
-            (Page::Editor, Ic::Editor, "nav-editor"),
-            (Page::Vault, Ic::Vault, "nav-vault"),
-        ];
-        for (page, icon, key) in pages {
-            if widgets::nav_item(ui, icon, &self.i18n.tr(key), self.page == page).clicked() {
-                self.page = page;
-            }
-        }
-        ui.add_space(8.0);
-        widgets::divider(ui);
-        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            ui.add_space(4.0);
+            // Logo: hexagon mark on a dark rounded tile, as Hyper Launcher.
+            let (r, _) = ui.allocate_exact_size(vec2(40.0, 40.0), egui::Sense::hover());
+            let tile = if p.dark {
+                egui::Color32::from_rgb(0x14, 0x17, 0x20)
+            } else {
+                p.card
+            };
+            ui.painter().rect_filled(r, 11.0, tile);
+            crate::icons::paint(ui.painter(), r.shrink(6.0), Ic::Logo, p.accent_line);
+            ui.vertical(|ui| {
+                ui.spacing_mut().item_spacing.y = -2.0;
+                ui.label(
+                    RichText::new("HYPER")
+                        .size(15.0)
+                        .strong()
+                        .extra_letter_spacing(1.5),
+                );
+                ui.label(
+                    RichText::new("CLIPS")
+                        .size(15.0)
+                        .strong()
+                        .extra_letter_spacing(1.5)
+                        .color(p.accent_line),
+                );
+            });
+        });
+        ui.add_space(24.0);
         for (page, icon, key) in [
+            (Page::Library, Ic::Library, "nav-library"),
+            (Page::Editor, Ic::Editor, "nav-editor"),
             (Page::Settings, Ic::Settings, "nav-settings"),
-            (Page::Privacy, Ic::Privacy, "nav-privacy"),
         ] {
             if widgets::nav_item(ui, icon, &self.i18n.tr(key), self.page == page).clicked() {
                 self.page = page;
             }
+            ui.add_space(4.0);
         }
     }
 
-    /// Storage and background-service status, pinned to the bottom.
+    /// Capture status, background service and storage, pinned to the bottom.
     fn sidebar_bottom(&mut self, ui: &mut egui::Ui) {
-        egui::Panel::bottom("side-bottom")
-            .frame(egui::Frame::NONE)
-            .show(ui, |ui| {
-                self.storage_card(ui);
-                ui.add_space(8.0);
-                self.service_status(ui);
-                ui.add_space(12.0);
-            });
-    }
-
-    fn storage_card(&mut self, ui: &mut egui::Ui) {
         let p = palette(ui.ctx());
         let cfg = self.settings.saved().clone();
         if self
@@ -150,204 +150,152 @@ impl StudioApp {
             self.disk_at = Some(Instant::now());
         }
         let (count, used) = self.library.stats();
-        egui::Frame::new()
-            .fill(p.card)
-            .stroke(Stroke::new(1.0, p.border))
-            .corner_radius(p.radius())
-            .inner_margin(Margin::same(12))
+        let status = self.core.status();
+        egui::Panel::bottom("side-bottom")
+            .frame(egui::Frame::NONE)
             .show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
-                    ui.horizontal(|ui| {
-                        crate::icons::icon(ui, Ic::Monitor, 15.0, p.weak);
-                        ui.label(RichText::new(self.i18n.tr("side-on-this-pc")).strong());
-                    });
-                    let (free, total) = self.disk.unwrap_or((0, 0));
-                    ui.horizontal(|ui| {
-                        ui.label(
-                            RichText::new(sys::format_bytes(used))
-                                .color(p.accent)
-                                .strong(),
-                        );
-                        if total > 0 {
-                            ui.label(
-                                RichText::new(format!(
-                                    "/ {} {}",
-                                    sys::format_bytes(free),
-                                    self.i18n.tr("side-free")
-                                ))
-                                .color(p.weak)
-                                .size(12.0),
-                            );
-                        }
-                    });
-                    if total > 0 {
-                        let frac = (total - free) as f32 / total as f32;
-                        let (r, _) = ui.allocate_exact_size(
-                            vec2(ui.available_width(), 6.0),
-                            egui::Sense::hover(),
-                        );
-                        ui.painter().rect_filled(r, 3.0, p.border);
-                        let mut fill = r;
-                        fill.set_width(r.width() * frac.clamp(0.0, 1.0));
-                        ui.painter().rect_filled(
-                            fill,
-                            3.0,
-                            if frac > 0.9 { p.danger } else { p.accent },
-                        );
-                    }
-                    ui.label(
-                        RichText::new(
-                            self.i18n
-                                .tr_args("side-items", &[("count", &count.to_string())]),
-                        )
-                        .color(p.weak)
-                        .size(12.0),
-                    );
-                });
-            });
-    }
-
-    fn service_status(&mut self, ui: &mut egui::Ui) {
-        let p = palette(ui.ctx());
-        match self.core.status() {
-            Some(s) => {
-                ui.horizontal(|ui| {
-                    ui.add_space(6.0);
-                    let (r, _) = ui.allocate_exact_size(vec2(8.0, 8.0), egui::Sense::hover());
-                    ui.painter().circle_filled(r.center(), 4.0, p.ok);
-                    ui.label(
-                        RichText::new(self.i18n.tr_args(
-                            "side-service-on",
-                            &[("mem", &sys::format_bytes(s.working_set_bytes))],
-                        ))
-                        .color(p.weak)
-                        .size(12.0),
-                    )
-                    .on_hover_text(format!("Hyper Clips {}", s.version));
-                });
-            }
-            None => {
-                ui.horizontal(|ui| {
-                    ui.add_space(6.0);
-                    let (r, _) = ui.allocate_exact_size(vec2(8.0, 8.0), egui::Sense::hover());
-                    ui.painter().circle_filled(r.center(), 4.0, p.danger);
-                    ui.label(
-                        RichText::new(self.i18n.tr("side-service-off"))
-                            .color(p.weak)
-                            .size(12.0),
-                    );
-                    if ui
+                widgets::divider(ui);
+                ui.add_space(10.0);
+                let (color, key) = match &status {
+                    Some(s) if s.recording => (p.danger, "top-recording"),
+                    Some(s) if s.replay_active => (p.ok, "top-replay-on"),
+                    Some(_) => (p.faint, "top-not-recording"),
+                    None => (p.danger, "side-service-off"),
+                };
+                widgets::status_line(ui, color, &self.i18n.tr(key));
+                if status.is_none()
+                    && ui
                         .small_button(self.i18n.tr("side-service-start"))
                         .clicked()
-                    {
-                        let _ =
-                            std::process::Command::new(self.paths.sibling_exe(hc_core::CORE_EXE))
-                                .arg("--background")
-                                .spawn();
-                    }
-                });
-            }
-        }
+                {
+                    let _ = std::process::Command::new(self.paths.sibling_exe(hc_core::CORE_EXE))
+                        .arg("--background")
+                        .spawn();
+                }
+                let free = self
+                    .disk
+                    .map(|(f, _)| sys::format_bytes(f))
+                    .unwrap_or_default();
+                ui.label(
+                    RichText::new(self.i18n.tr_args(
+                        "side-storage",
+                        &[
+                            ("count", &count.to_string()),
+                            ("used", &sys::format_bytes(used)),
+                            ("free", &free),
+                        ],
+                    ))
+                    .color(p.faint)
+                    .size(11.5),
+                );
+                ui.add_space(14.0);
+            });
     }
 
     fn top_bar(&mut self, ui: &mut egui::Ui) {
         let p = palette(ui.ctx());
-        ui.add_space(10.0);
-        ui.horizontal(|ui| {
-            ui.add_space(8.0);
-            ui.label(RichText::new(self.title()).size(22.0).strong());
-            ui.add_space(10.0);
-            self.capture_pill(ui);
-            if matches!(self.page, Page::Library | Page::Highlights) {
-                ui.add_space(8.0);
-                self.library.search_box(ui, &self.i18n.tr("lib-search"));
-            }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.add_space(8.0);
-                if matches!(self.page, Page::Library | Page::Highlights)
-                    && widgets::icon_label_button(ui, Ic::Share, &self.i18n.tr("top-share-last"))
-                        .on_hover_text(self.i18n.tr("top-share-last-hint"))
-                        .clicked()
-                {
-                    let cfg = self.settings.saved().clone();
-                    if let Err(e) = self.library.share_latest(&cfg) {
-                        self.notice = Some((e, Instant::now()));
+        let cfg = self.settings.saved().clone();
+        egui::Frame::new()
+            .fill(p.card)
+            .stroke(Stroke::new(1.0, p.border))
+            .corner_radius(p.radius())
+            .inner_margin(Margin::symmetric(14, 10))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    if self.page == Page::Library {
+                        let w = (ui.available_width() - 360.0).clamp(220.0, 460.0);
+                        self.library.search_box(ui, &self.i18n, w);
+                    } else {
+                        let title = match self.page {
+                            Page::Editor => "nav-editor",
+                            _ => "nav-settings",
+                        };
+                        ui.add_space(6.0);
+                        ui.label(RichText::new(self.i18n.tr(title)).size(18.0).strong());
                     }
-                }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        // Resolution.
+                        let r = widgets::bar_pill(
+                            ui,
+                            &height_label(&self.i18n, cfg.capture.height),
+                            None,
+                            true,
+                        )
+                        .on_hover_text(self.i18n.tr("top-resolution-hint"));
+                        let mut pick_h = None;
+                        egui::Popup::menu(&r).show(|ui| {
+                            ui.set_min_width(140.0);
+                            for h in HEIGHT_CHOICES {
+                                if ui
+                                    .selectable_label(
+                                        cfg.capture.height == h,
+                                        height_label(&self.i18n, h),
+                                    )
+                                    .clicked()
+                                {
+                                    pick_h = Some(h);
+                                }
+                            }
+                        });
+                        if let Some(h) = pick_h {
+                            self.quick_edit(|c| c.capture.height = h);
+                        }
+                        // Replay length.
+                        let r = widgets::bar_pill(
+                            ui,
+                            &seconds_label(cfg.capture.replay_seconds),
+                            None,
+                            true,
+                        )
+                        .on_hover_text(self.i18n.tr("top-replay-hint"));
+                        let mut pick_s = None;
+                        egui::Popup::menu(&r).show(|ui| {
+                            ui.set_min_width(140.0);
+                            for s in REPLAY_CHOICES {
+                                if ui
+                                    .selectable_label(
+                                        cfg.capture.replay_seconds == s,
+                                        seconds_label(s),
+                                    )
+                                    .clicked()
+                                {
+                                    pick_s = Some(s);
+                                }
+                            }
+                        });
+                        if let Some(s) = pick_s {
+                            self.quick_edit(|c| c.capture.replay_seconds = s);
+                        }
+                        // Save-clip key.
+                        let key = if cfg.hotkeys.save_clip.is_empty() {
+                            "-"
+                        } else {
+                            cfg.hotkeys.save_clip.as_str()
+                        };
+                        if widgets::bar_pill(ui, &self.i18n.tr("top-keybind"), Some(key), false)
+                            .on_hover_text(self.i18n.tr("top-keybind-hint"))
+                            .clicked()
+                        {
+                            self.page = Page::Settings;
+                            self.settings.open_category(Category::Hotkeys);
+                        }
+                    });
+                });
             });
-        });
-        ui.add_space(10.0);
-        let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 1.0), egui::Sense::hover());
-        ui.painter().rect_filled(r, 0.0, p.border);
     }
 
-    /// "Replay on / Recording / Not recording" pill with a quick-action menu.
-    fn capture_pill(&mut self, ui: &mut egui::Ui) {
-        let p = palette(ui.ctx());
-        let status = self.core.status();
-        let (color, key) = match &status {
-            Some(s) if s.recording => (p.danger, "top-recording"),
-            Some(s) if s.replay_active => (p.ok, "top-replay-on"),
-            Some(_) => (p.weak, "top-not-recording"),
-            None => (p.weak, "side-service-off"),
-        };
-        let resp = widgets::status_pill(ui, color, &self.i18n.tr(key));
-        let i = &self.i18n;
-        let hk = self.settings.saved().hotkeys.clone();
-        let mut run = None;
-        let mut open_settings = false;
-        egui::Popup::menu(&resp).show(|ui| {
-            ui.set_min_width(230.0);
-            let item = |ui: &mut egui::Ui, label: String, key: &str| {
-                let text = if key.is_empty() {
-                    label
-                } else {
-                    format!("{label}    {key}")
-                };
-                ui.button(text).clicked()
-            };
-            if item(ui, i.tr("action-save-clip"), &hk.save_clip) {
-                run = Some(Action::SaveClip);
-            }
-            let rec = if status.as_ref().is_some_and(|s| s.recording) {
-                i.tr("top-stop-recording")
-            } else {
-                i.tr("top-start-recording")
-            };
-            if item(ui, rec, &hk.toggle_recording) {
-                run = Some(Action::ToggleRecording);
-            }
-            if item(ui, i.tr("action-screenshot"), &hk.screenshot) {
-                run = Some(Action::Screenshot);
-            }
-            if item(ui, i.tr("action-add-marker"), &hk.add_marker) {
-                run = Some(Action::AddMarker);
-            }
-            ui.separator();
-            if ui.button(i.tr("top-capture-settings")).clicked() {
-                open_settings = true;
-            }
-        });
-        if let Some(a) = run {
-            match self.core.request(&Request::Run(a)) {
-                Ok(hc_core::ipc::Response::Unavailable(m) | hc_core::ipc::Response::Error(m)) => {
-                    self.notice = Some((m, Instant::now()));
-                }
-                Err(_) => self.notice = Some((self.i18n.tr("side-service-off"), Instant::now())),
-                Ok(_) => {}
-            }
-        }
-        if open_settings {
-            self.page = Page::Settings;
-            self.settings
-                .open_category(crate::settings::Category::Capture);
+    /// Change a capture setting from the top bar: saved at once and applied
+    /// by the core.
+    fn quick_edit(&mut self, f: impl FnOnce(&mut Config)) {
+        match self.settings.quick_edit(&self.paths, &self.core, f) {
+            Ok(()) => self.notice = Some((self.i18n.tr("settings-saved"), Instant::now())),
+            Err(e) => self.notice = Some((e, Instant::now())),
         }
     }
 
     fn notice_toast(&mut self, ctx: &egui::Context) {
         if let Some((msg, at)) = &self.notice {
-            if at.elapsed() > Duration::from_secs(4) {
+            if at.elapsed() > Duration::from_secs(3) {
                 self.notice = None;
                 return;
             }
@@ -363,43 +311,42 @@ impl StudioApp {
 
 impl eframe::App for StudioApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        let p = palette(ui.ctx());
-        egui::Panel::left("nav")
-            .resizable(false)
-            .exact_size(232.0)
-            .frame(
-                egui::Frame::new()
-                    .fill(p.sidebar)
-                    .stroke(Stroke::new(1.0, p.border))
-                    .inner_margin(Margin::symmetric(12, 0)),
-            )
-            .show(ui, |ui| self.sidebar(ui));
-        egui::Panel::top("top")
-            .frame(
-                egui::Frame::new()
-                    .fill(p.bg)
-                    .inner_margin(Margin::symmetric(12, 0)),
-            )
-            .show(ui, |ui| self.top_bar(ui));
         let ctx = ui.ctx().clone();
         if self.page != Page::Settings {
             self.settings.end_preview(&ctx);
         }
-        egui::CentralPanel::default()
+        theme::paint_background(&ctx);
+        let p = palette(&ctx);
+        egui::Panel::left("nav")
+            .resizable(false)
+            .exact_size(220.0)
             .frame(
                 egui::Frame::new()
-                    .fill(p.bg)
-                    .inner_margin(Margin::symmetric(20, 14)),
+                    .fill(p.sidebar)
+                    .stroke(Stroke::new(1.0, p.border))
+                    .inner_margin(Margin::symmetric(14, 0)),
             )
+            .show(ui, |ui| self.sidebar(ui));
+        egui::Panel::top("top")
+            .show_separator_line(false)
+            .frame(egui::Frame::new().fill(p.bg).inner_margin(Margin {
+                left: 24,
+                right: 24,
+                top: 18,
+                bottom: 14,
+            }))
+            .show(ui, |ui| self.top_bar(ui));
+        egui::CentralPanel::default()
+            .frame(egui::Frame::new().fill(p.bg).inner_margin(Margin {
+                left: 24,
+                right: 24,
+                top: 6,
+                bottom: 16,
+            }))
             .show(ui, |ui| match self.page {
-                Page::Library | Page::Highlights => {
-                    let view = if self.page == Page::Highlights {
-                        View::Highlights
-                    } else {
-                        View::All
-                    };
+                Page::Library => {
                     let cfg = self.settings.saved().clone();
-                    self.library.ui(ui, &self.i18n, &cfg, view);
+                    self.library.ui(ui, &self.i18n, &cfg);
                     if let Some((path, title)) = self.library.take_edit_request() {
                         self.editor.add_clip(&path, &title);
                         self.page = Page::Editor;
@@ -407,27 +354,33 @@ impl eframe::App for StudioApp {
                     if let Some((id, path)) = self.library.take_vault_request() {
                         self.library.close_detail();
                         self.vault.request_add(id, path);
-                        self.page = Page::Vault;
+                        self.page = Page::Settings;
+                        self.settings.open_category(Category::Vault);
                     }
                     if self.library.take_settings_request() {
                         self.page = Page::Settings;
-                        self.settings
-                            .open_category(crate::settings::Category::Library);
+                        self.settings.open_category(Category::Library);
                     }
                 }
                 Page::Editor => self.editor.ui(ui, &self.i18n),
-                Page::Vault => self.vault.ui(ui, &self.i18n),
                 Page::Settings => {
-                    if let Some(saved) = self.settings.ui(ui, &self.i18n, &self.paths, &self.core) {
+                    let cfg = self.settings.saved().clone();
+                    let (vault, privacy, paths, core) =
+                        (&mut self.vault, &mut self.privacy, &self.paths, &self.core);
+                    let i18n = &self.i18n;
+                    let mut embedded = |c: Category, ui: &mut egui::Ui| match c {
+                        Category::Vault => vault.ui(ui, i18n),
+                        Category::Privacy => privacy.ui(ui, i18n, paths, &cfg, core),
+                        _ => {}
+                    };
+                    if let Some(saved) =
+                        self.settings
+                            .ui(ui, &self.i18n, &self.paths, &self.core, &mut embedded)
+                    {
                         theme::apply(ui.ctx(), &saved);
                         self.i18n =
                             Localizer::new(&saved.general.language, Some(&self.paths.exe_dir));
                     }
-                }
-                Page::Privacy => {
-                    let cfg = self.settings.saved().clone();
-                    self.privacy
-                        .ui(ui, &self.i18n, &self.paths, &cfg, &self.core);
                 }
             });
         self.notice_toast(&ctx);

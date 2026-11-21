@@ -64,31 +64,90 @@ pub enum StartPage {
     Editor,
 }
 
-/// Look of the studio (Personalisation page).
+/// Window background behind the panels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum Background {
+    /// The theme colours.
+    #[default]
+    Solid,
+    /// Two colours blending into each other.
+    Gradient,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum GradientDirection {
+    #[default]
+    Down,
+    Up,
+    Right,
+    Left,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum ButtonStyle {
+    #[default]
+    Standard,
+    /// Translucent "liquid glass" buttons.
+    Liquid,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum Animations {
+    #[default]
+    Full,
+    Reduced,
+    Off,
+}
+
+/// Look of the studio (Personalisation page), shared with Hyper Launcher.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Appearance {
     /// Accent colour as `#rrggbb`.
     pub accent: String,
+    pub background: Background,
+    pub gradient_from: String,
+    pub gradient_to: String,
+    pub gradient_direction: GradientDirection,
+    /// Opacity of the panels over a gradient background, 20..=100 %.
+    pub panel_opacity: u8,
+    pub buttons: ButtonStyle,
+    pub animations: Animations,
     /// Target width of a library card in points.
     pub card_size: u32,
     /// Tighter spacing everywhere.
     pub compact: bool,
-    /// Corner rounding of cards and controls (0 = square).
+    /// Corner rounding of cards and controls: 6 sharp, 14 normal, 20 round.
     pub corner_radius: u8,
     pub show_game_badge: bool,
-    /// Time, length and size under each card.
+    /// Game and length under each card.
     pub show_details: bool,
     pub start_page: StartPage,
 }
 
+/// Accent colours offered by the Personalisation page (same as Hyper Launcher).
+pub const ACCENTS: [&str; 5] = ["#6e5ae6", "#2f6fe4", "#12856f", "#c2571a", "#c0306a"];
+/// Default accent of the first releases, migrated to the new default.
+const OLD_DEFAULT_ACCENT: &str = "#e0403a";
+
 impl Default for Appearance {
     fn default() -> Self {
         Self {
-            accent: "#e0403a".into(),
-            card_size: 300,
+            accent: ACCENTS[0].into(),
+            background: Background::Solid,
+            gradient_from: "#2a2340".into(),
+            gradient_to: "#0f1115".into(),
+            gradient_direction: GradientDirection::Down,
+            panel_opacity: 85,
+            buttons: ButtonStyle::Standard,
+            animations: Animations::Full,
+            card_size: 240,
             compact: false,
-            corner_radius: 10,
+            corner_radius: 14,
             show_game_badge: true,
             show_details: true,
             start_page: StartPage::Library,
@@ -99,12 +158,16 @@ impl Default for Appearance {
 impl Appearance {
     /// Accent as RGB; falls back to the default on a malformed value.
     pub fn accent_rgb(&self) -> [u8; 3] {
-        parse_hex(&self.accent)
-            .or_else(|| parse_hex(&Self::default().accent))
-            .unwrap_or([224, 64, 58])
+        parse_hex(&self.accent).unwrap_or([0x6e, 0x5a, 0xe6])
+    }
+
+    pub fn gradient_rgb(&self) -> ([u8; 3], [u8; 3]) {
+        (
+            parse_hex(&self.gradient_from).unwrap_or([0x2a, 0x23, 0x40]),
+            parse_hex(&self.gradient_to).unwrap_or([0x0f, 0x11, 0x15]),
+        )
     }
 }
-
 fn parse_hex(s: &str) -> Option<[u8; 3]> {
     let h = s.trim().trim_start_matches('#');
     if h.len() != 6 || !h.is_ascii() {
@@ -665,10 +728,19 @@ impl Config {
         }
         self.profiles.retain(|p| !p.game.trim().is_empty());
         let ap = &mut self.appearance;
-        ap.card_size = ap.card_size.clamp(180, 420);
-        ap.corner_radius = ap.corner_radius.min(18);
-        if parse_hex(&ap.accent).is_none() {
+        ap.card_size = ap.card_size.clamp(160, 420);
+        ap.corner_radius = ap.corner_radius.min(24);
+        ap.panel_opacity = ap.panel_opacity.clamp(20, 100);
+        if parse_hex(&ap.accent).is_none() || ap.accent.eq_ignore_ascii_case(OLD_DEFAULT_ACCENT) {
             ap.accent = Appearance::default().accent;
+        }
+        for (v, d) in [
+            (&mut ap.gradient_from, "#2a2340"),
+            (&mut ap.gradient_to, "#0f1115"),
+        ] {
+            if parse_hex(v).is_none() {
+                *v = d.into();
+            }
         }
     }
 
@@ -813,7 +885,11 @@ mod tests {
         };
         assert_eq!(a.accent_rgb(), [0x10, 0xb9, 0x81]);
         a.accent = "nope".into();
-        assert_eq!(a.accent_rgb(), [224, 64, 58]);
+        assert_eq!(a.accent_rgb(), [0x6e, 0x5a, 0xe6]);
+        let mut cfg = Config::default();
+        cfg.appearance.accent = "#E0403A".into();
+        cfg.sanitize();
+        assert_eq!(cfg.appearance.accent, ACCENTS[0]);
     }
 
     #[test]

@@ -13,7 +13,6 @@ pub enum Ic {
     Privacy,
     Share,
     Search,
-    More,
     Camera,
     Record,
     Monitor,
@@ -31,6 +30,9 @@ pub enum Ic {
     Star,
     StarFilled,
     Play,
+    Clock,
+    Filter,
+    Logo,
 }
 
 pub fn paint(p: &Painter, rect: Rect, icon: Ic, color: Color32) {
@@ -135,11 +137,6 @@ pub fn paint(p: &Painter, rect: Rect, icon: Ic, color: Color32) {
         Ic::Search => {
             p.circle_stroke(pt(7.0, 7.0), 4.5 * u, st);
             line(pt(10.3, 10.3), pt(14.0, 14.0));
-        }
-        Ic::More => {
-            for x in [3.0, 8.0, 13.0] {
-                p.circle_filled(pt(x, 8.0), 1.3 * u, color);
-            }
         }
         Ic::Camera => {
             rrect(1.5, 4.5, 14.5, 13.5, 2.0);
@@ -304,6 +301,36 @@ pub fn paint(p: &Painter, rect: Rect, icon: Ic, color: Color32) {
             } else {
                 p.add(Shape::closed_line(pts, st));
             }
+        }
+        Ic::Clock => {
+            p.circle_stroke(c, 6.3 * u, st);
+            line(pt(8.0, 4.2), pt(8.0, 8.0));
+            line(pt(8.0, 8.0), pt(10.8, 9.8));
+        }
+        Ic::Filter => {
+            line(pt(2.0, 4.0), pt(14.0, 4.0));
+            line(pt(4.5, 8.0), pt(11.5, 8.0));
+            line(pt(6.5, 12.0), pt(9.5, 12.0));
+        }
+        Ic::Logo => {
+            // Hexagon like Hyper Launcher's mark, with a play triangle.
+            let hex: Vec<Pos2> = (0..6)
+                .map(|k| {
+                    let a = -std::f32::consts::FRAC_PI_2 + k as f32 * std::f32::consts::FRAC_PI_3;
+                    pt(8.0 + 7.0 * a.cos(), 8.0 + 7.0 * a.sin())
+                })
+                .collect();
+            p.add(Shape::convex_polygon(
+                hex.clone(),
+                color.gamma_multiply(0.25),
+                Stroke::NONE,
+            ));
+            p.add(Shape::closed_line(hex, Stroke::new(1.9 * u, color)));
+            p.add(Shape::convex_polygon(
+                vec![pt(6.3, 5.0), pt(11.2, 8.0), pt(6.3, 11.0)],
+                color,
+                Stroke::NONE,
+            ));
         }
         Ic::Play => {
             p.add(Shape::convex_polygon(

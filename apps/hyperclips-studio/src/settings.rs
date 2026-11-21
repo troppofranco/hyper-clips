@@ -20,10 +20,6 @@ use crate::theme::palette;
 use crate::widgets::{card, divider, nav_item, row, toggle};
 
 const FPS_CHOICES: [u32; 6] = [30, 60, 120, 144, 165, 240];
-const ACCENTS: [&str; 10] = [
-    "#e0403a", "#f97316", "#eab308", "#22c55e", "#10b981", "#06b6d4", "#3b82f6", "#6366f1",
-    "#8b5cf6", "#ec4899",
-];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Category {
@@ -40,10 +36,12 @@ pub enum Category {
     Plugins,
     Updates,
     Backup,
+    Vault,
+    Privacy,
 }
 
 impl Category {
-    const ALL: [Category; 13] = [
+    const ALL: [Category; 15] = [
         Category::General,
         Category::Appearance,
         Category::Capture,
@@ -57,6 +55,8 @@ impl Category {
         Category::Plugins,
         Category::Updates,
         Category::Backup,
+        Category::Vault,
+        Category::Privacy,
     ];
 
     fn key(self) -> &'static str {
@@ -74,6 +74,8 @@ impl Category {
             Category::Plugins => "cat-plugins",
             Category::Updates => "cat-updates",
             Category::Backup => "cat-backup",
+            Category::Vault => "cat-vault",
+            Category::Privacy => "cat-privacy",
         }
     }
 
@@ -92,6 +94,8 @@ impl Category {
             Category::Plugins => Ic::Plug,
             Category::Updates => Ic::Download,
             Category::Backup => Ic::Save,
+            Category::Vault => Ic::Vault,
+            Category::Privacy => Ic::Privacy,
         }
     }
 }
@@ -157,6 +161,28 @@ impl SettingsPage {
         }
     }
 
+    /// Change and save a setting right away (top-bar quick controls), keeping
+    /// any unsaved draft edits.
+    pub fn quick_edit(
+        &mut self,
+        paths: &AppPaths,
+        core: &CoreLink,
+        f: impl FnOnce(&mut Config),
+    ) -> Result<(), String> {
+        let mut next = self.saved.clone();
+        f(&mut next);
+        next.sanitize();
+        next.save(&paths.config_file()).map_err(|e| e.to_string())?;
+        // Carry the same change into the draft.
+        let mut draft = self.draft.clone();
+        draft.capture.replay_seconds = next.capture.replay_seconds;
+        draft.capture.height = next.capture.height;
+        self.draft = draft;
+        self.saved = next;
+        let _ = core.request(&Request::ReloadConfig);
+        Ok(())
+    }
+
     pub fn open_category(&mut self, c: Category) {
         self.category = c;
     }
@@ -175,6 +201,7 @@ impl SettingsPage {
         i: &Localizer,
         paths: &AppPaths,
         core: &CoreLink,
+        embedded: &mut dyn FnMut(Category, &mut egui::Ui),
     ) -> Option<Config> {
         let problems = hotkey_problems(&self.draft.hotkeys);
         let mut saved = None;
@@ -236,6 +263,11 @@ impl SettingsPage {
             .show(ui, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     for c in Category::ALL {
+                        if c == Category::Vault {
+                            ui.add_space(6.0);
+                            crate::widgets::divider(ui);
+                            ui.add_space(6.0);
+                        }
                         if nav_item(ui, c.icon(), &i.tr(c.key()), self.category == c).clicked() {
                             self.category = c;
                         }
@@ -249,7 +281,11 @@ impl SettingsPage {
                     .auto_shrink(false)
                     .show(ui, |ui| {
                         // Leave room for the floating scroll bar.
-                        ui.set_max_width((ui.available_width() - 18.0).min(820.0));
+                        ui.set_max_width((ui.available_width() - 18.0).min(860.0));
+                        if matches!(self.category, Category::Vault | Category::Privacy) {
+                            embedded(self.category, ui);
+                            return;
+                        }
                         crate::widgets::page_header(
                             ui,
                             &i.tr(self.category.key()),
@@ -300,6 +336,7 @@ impl SettingsPage {
                                 );
                             }
                             Category::Updates => self.updates(ui, i, paths),
+                            Category::Vault | Category::Privacy => {}
                             Category::Backup => {
                                 if let Some(crate::settings_extra::ExtraOutcome::Restored(cfg)) =
                                     crate::settings_extra::backup(&mut self.extra, ui, i, paths)
@@ -394,22 +431,41 @@ impl SettingsPage {
     }
 
     fn appearance(&mut self, ui: &mut egui::Ui, i: &Localizer) {
+        use hc_core::config::{ACCENTS, Animations, Background, ButtonStyle, GradientDirection};
         let d = &mut self.draft;
+        let pal = palette(ui.ctx());
         card(ui, Some(&i.tr("look-theme")), |ui| {
-            ui.horizontal_wrapped(|ui| {
-                for (t, key) in [
+            ui.columns(4, |cols| {
+                for (k, (t, key)) in [
                     (Theme::Dark, "theme-dark"),
                     (Theme::Light, "theme-light"),
                     (Theme::Oled, "theme-oled"),
                     (Theme::HighContrast, "theme-high-contrast"),
-                ] {
-                    if theme_tile(
-                        ui,
-                        t,
-                        &i.tr(key),
-                        d.general.theme == t,
-                        d.appearance.accent_rgb(),
-                    )
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    let tp = crate::theme::palette_for(t, &d.appearance);
+                    if choice(&mut cols[k], &i.tr(key), d.general.theme == t, |pt, r| {
+                        // Mini swatch: background / surface split diagonally.
+                        pt.rect_filled(r, 7.0, tp.card_hover);
+                        let tri = vec![r.left_top(), r.right_top(), r.left_bottom()];
+                        pt.add(egui::Shape::convex_polygon(
+                            tri,
+                            if t == Theme::Light {
+                                egui::Color32::WHITE
+                            } else {
+                                tp.sidebar
+                            },
+                            Stroke::NONE,
+                        ));
+                        pt.rect_stroke(
+                            r,
+                            7.0,
+                            Stroke::new(1.0, pal.line_strong),
+                            egui::StrokeKind::Inside,
+                        );
+                    })
                     .clicked()
                     {
                         d.general.theme = t;
@@ -419,22 +475,21 @@ impl SettingsPage {
         });
         card(ui, Some(&i.tr("look-accent")), |ui| {
             ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing.x = 10.0;
                 for hex in ACCENTS {
                     let rgb = hc_core::config::Appearance {
                         accent: hex.into(),
                         ..Default::default()
                     }
                     .accent_rgb();
-                    let c = egui::Color32::from_rgb(rgb[0], rgb[1], rgb[2]);
-                    let selected = d.appearance.accent.eq_ignore_ascii_case(hex);
-                    let (r, resp) = ui.allocate_exact_size(vec2(30.0, 30.0), egui::Sense::click());
-                    ui.painter().circle_filled(r.center(), 13.0, c);
-                    if selected {
-                        ui.painter().circle_stroke(
-                            r.center(),
-                            15.0,
-                            Stroke::new(2.0, palette(ui.ctx()).text),
-                        );
+                    let col = egui::Color32::from_rgb(rgb[0], rgb[1], rgb[2]);
+                    let on = d.appearance.accent.eq_ignore_ascii_case(hex);
+                    let (r, resp) = ui.allocate_exact_size(vec2(38.0, 38.0), egui::Sense::click());
+                    let grow = if resp.hovered() { 1.0 } else { 0.0 };
+                    ui.painter().circle_filled(r.center(), 16.0 + grow, col);
+                    if on {
+                        ui.painter()
+                            .circle_stroke(r.center(), 17.5, Stroke::new(3.0, pal.text));
                     }
                     if resp
                         .on_hover_cursor(egui::CursorIcon::PointingHand)
@@ -443,7 +498,11 @@ impl SettingsPage {
                         d.appearance.accent = hex.into();
                     }
                 }
+                let custom = !ACCENTS
+                    .iter()
+                    .any(|h| d.appearance.accent.eq_ignore_ascii_case(h));
                 let mut rgb = d.appearance.accent_rgb();
+                ui.add_space(4.0);
                 if ui
                     .color_edit_button_srgb(&mut rgb)
                     .on_hover_text(i.tr("look-accent-custom"))
@@ -451,28 +510,148 @@ impl SettingsPage {
                 {
                     d.appearance.accent = format!("#{:02x}{:02x}{:02x}", rgb[0], rgb[1], rgb[2]);
                 }
+                ui.label(RichText::new(i.tr("look-custom")).color(if custom {
+                    pal.text
+                } else {
+                    pal.weak
+                }));
             });
             if d.general.theme == Theme::HighContrast {
                 ui.label(
                     RichText::new(i.tr("look-accent-hc"))
-                        .color(palette(ui.ctx()).weak)
+                        .color(pal.weak)
                         .size(12.5),
                 );
             }
         });
-        card(ui, Some(&i.tr("look-layout")), |ui| {
+        card(ui, Some(&i.tr("look-background")), |ui| {
             let a = &mut d.appearance;
+            let (gf, gt) = a.gradient_rgb();
+            let g0 = egui::Color32::from_rgb(gf[0], gf[1], gf[2]);
+            let g1 = egui::Color32::from_rgb(gt[0], gt[1], gt[2]);
+            ui.columns(2, |cols| {
+                if choice(
+                    &mut cols[0],
+                    &i.tr("look-bg-solid"),
+                    a.background == Background::Solid,
+                    |pt, r| {
+                        pt.rect_filled(r, 7.0, pal.bg_deep);
+                        pt.rect_stroke(
+                            r,
+                            7.0,
+                            Stroke::new(1.0, pal.line_strong),
+                            egui::StrokeKind::Inside,
+                        );
+                    },
+                )
+                .clicked()
+                {
+                    a.background = Background::Solid;
+                }
+                if choice(
+                    &mut cols[1],
+                    &i.tr("look-bg-gradient"),
+                    a.background == Background::Gradient,
+                    |pt, r| {
+                        let mut mesh = egui::Mesh::default();
+                        mesh.colored_vertex(r.left_top(), g0);
+                        mesh.colored_vertex(r.right_top(), g0);
+                        mesh.colored_vertex(r.right_bottom(), g1);
+                        mesh.colored_vertex(r.left_bottom(), g1);
+                        mesh.add_triangle(0, 1, 2);
+                        mesh.add_triangle(0, 2, 3);
+                        pt.add(egui::Shape::mesh(mesh));
+                        pt.rect_stroke(
+                            r,
+                            7.0,
+                            Stroke::new(1.0, pal.line_strong),
+                            egui::StrokeKind::Inside,
+                        );
+                    },
+                )
+                .clicked()
+                {
+                    a.background = Background::Gradient;
+                }
+            });
+            if a.background == Background::Gradient {
+                ui.add_space(8.0);
+                row(ui, &i.tr("look-gradient-colors"), "", |ui| {
+                    if ui.button(i.tr("look-swap")).clicked() {
+                        std::mem::swap(&mut a.gradient_from, &mut a.gradient_to);
+                    }
+                    for v in [&mut a.gradient_to, &mut a.gradient_from] {
+                        let mut rgb = hc_core::config::Appearance {
+                            accent: v.clone(),
+                            ..Default::default()
+                        }
+                        .accent_rgb();
+                        if ui.color_edit_button_srgb(&mut rgb).changed() {
+                            *v = format!("#{:02x}{:02x}{:02x}", rgb[0], rgb[1], rgb[2]);
+                        }
+                    }
+                });
+                divider(ui);
+                row(ui, &i.tr("look-direction"), "", |ui| {
+                    crate::widgets::segmented(
+                        ui,
+                        &mut a.gradient_direction,
+                        &[
+                            (GradientDirection::Down, i.tr("dir-down")),
+                            (GradientDirection::Up, i.tr("dir-up")),
+                            (GradientDirection::Right, i.tr("dir-right")),
+                            (GradientDirection::Left, i.tr("dir-left")),
+                        ],
+                    );
+                });
+                divider(ui);
+                row(ui, &i.tr("look-panel-opacity"), "", |ui| {
+                    ui.add(egui::Slider::new(&mut a.panel_opacity, 20..=100).suffix(" %"));
+                });
+            }
+        });
+        card(ui, Some(&i.tr("look-shape")), |ui| {
+            let a = &mut d.appearance;
+            row(ui, &i.tr("look-radius"), "", |ui| {
+                crate::widgets::segmented(
+                    ui,
+                    &mut a.corner_radius,
+                    &[
+                        (6, i.tr("radius-sharp")),
+                        (14, i.tr("radius-normal")),
+                        (20, i.tr("radius-round")),
+                    ],
+                );
+            });
+            divider(ui);
             row(
                 ui,
-                &i.tr("look-card-size"),
-                &i.tr("look-card-size-hint"),
+                &i.tr("look-buttons"),
+                &i.tr("look-buttons-hint"),
                 |ui| {
-                    ui.add(egui::Slider::new(&mut a.card_size, 180..=420).suffix(" px"));
+                    crate::widgets::segmented(
+                        ui,
+                        &mut a.buttons,
+                        &[
+                            (ButtonStyle::Standard, i.tr("buttons-standard")),
+                            (ButtonStyle::Liquid, i.tr("buttons-liquid")),
+                        ],
+                    );
                 },
             );
             divider(ui);
-            row(ui, &i.tr("look-radius"), "", |ui| {
-                ui.add(egui::Slider::new(&mut a.corner_radius, 0..=18));
+            row(ui, &i.tr("look-animations"), "", |ui| {
+                if crate::widgets::segmented(
+                    ui,
+                    &mut a.animations,
+                    &[
+                        (Animations::Full, i.tr("anim-full")),
+                        (Animations::Reduced, i.tr("anim-reduced")),
+                        (Animations::Off, i.tr("anim-off")),
+                    ],
+                ) {
+                    d.general.reduce_motion = false;
+                }
             });
             divider(ui);
             row(
@@ -481,6 +660,17 @@ impl SettingsPage {
                 &i.tr("look-compact-hint"),
                 |ui| {
                     toggle(ui, &mut a.compact);
+                },
+            );
+        });
+        card(ui, Some(&i.tr("look-layout")), |ui| {
+            let a = &mut d.appearance;
+            row(
+                ui,
+                &i.tr("look-card-size"),
+                &i.tr("look-card-size-hint"),
+                |ui| {
+                    ui.add(egui::Slider::new(&mut a.card_size, 160..=420).suffix(" px"));
                 },
             );
             divider(ui);
@@ -498,49 +688,23 @@ impl SettingsPage {
             );
             divider(ui);
             row(ui, &i.tr("look-start-page"), "", |ui| {
-                egui::ComboBox::from_id_salt("start")
-                    .selected_text(i.tr(match a.start_page {
-                        StartPage::Library => "nav-library",
-                        StartPage::Highlights => "nav-highlights",
-                        StartPage::Editor => "nav-editor",
-                    }))
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(
-                            &mut a.start_page,
-                            StartPage::Library,
-                            i.tr("nav-library"),
-                        );
-                        ui.selectable_value(
-                            &mut a.start_page,
-                            StartPage::Highlights,
-                            i.tr("nav-highlights"),
-                        );
-                        ui.selectable_value(
-                            &mut a.start_page,
-                            StartPage::Editor,
-                            i.tr("nav-editor"),
-                        );
-                    });
+                crate::widgets::segmented(
+                    ui,
+                    &mut a.start_page,
+                    &[
+                        (StartPage::Library, i.tr("nav-library")),
+                        (StartPage::Editor, i.tr("nav-editor")),
+                    ],
+                );
             });
-        });
-        card(ui, Some(&i.tr("settings-accessibility")), |ui| {
-            let g = &mut d.general;
+            divider(ui);
             row(
                 ui,
                 &i.tr("settings-ui-scale"),
                 &i.tr("look-scale-hint"),
                 |ui| {
-                    ui.add(egui::Slider::new(&mut g.ui_scale, 0.75..=2.0).step_by(0.05));
+                    ui.add(egui::Slider::new(&mut d.general.ui_scale, 0.75..=2.0).step_by(0.05));
                 },
-            );
-            divider(ui);
-            row(ui, &i.tr("settings-reduce-motion"), "", |ui| {
-                toggle(ui, &mut g.reduce_motion);
-            });
-            ui.label(
-                RichText::new(i.tr("settings-accessibility-hint"))
-                    .color(palette(ui.ctx()).weak)
-                    .size(12.5),
             );
         });
         if ui.button(i.tr("look-reset")).clicked() {
@@ -550,7 +714,6 @@ impl SettingsPage {
             d.general.reduce_motion = false;
         }
     }
-
     fn capture(&mut self, ui: &mut egui::Ui, i: &Localizer) {
         let c = &mut self.draft.capture;
         card(ui, Some(&i.tr("cap-replay")), |ui| {
@@ -1026,69 +1189,37 @@ impl SettingsPage {
     }
 }
 
-/// Clickable preview tile for a theme.
-fn theme_tile(
+/// Launcher-style choice button: a small preview, the label, selected state.
+fn choice(
     ui: &mut egui::Ui,
-    t: Theme,
     label: &str,
-    selected: bool,
-    accent: [u8; 3],
+    on: bool,
+    preview: impl FnOnce(&egui::Painter, egui::Rect),
 ) -> egui::Response {
-    let pal = crate::theme::palette_for(t, accent, 6, false);
-    let cur = palette(ui.ctx());
-    let (rect, resp) = ui.allocate_exact_size(vec2(150.0, 104.0), egui::Sense::click());
-    let painter = ui.painter();
-    let preview = egui::Rect::from_min_size(rect.min, vec2(150.0, 78.0));
-    painter.rect(
-        preview,
-        8.0,
-        pal.bg,
-        Stroke::new(
-            if selected { 2.0 } else { 1.0 },
-            if selected { cur.accent } else { cur.border },
-        ),
-        egui::StrokeKind::Inside,
-    );
-    // Mini sidebar + two cards.
-    let side = egui::Rect::from_min_size(preview.min + vec2(4.0, 4.0), vec2(34.0, 70.0));
-    painter.rect_filled(side, 4.0, pal.sidebar);
-    painter.rect_filled(
-        egui::Rect::from_min_size(side.min + vec2(5.0, 8.0), vec2(24.0, 6.0)),
-        3.0,
-        pal.accent,
-    );
-    for k in 0..2 {
-        let c = egui::Rect::from_min_size(
-            preview.min + vec2(46.0 + k as f32 * 50.0, 12.0),
-            vec2(44.0, 54.0),
-        );
-        painter.rect_filled(c, 4.0, pal.card);
-        painter.rect_filled(
-            egui::Rect::from_min_size(c.min, vec2(44.0, 28.0)),
-            4.0,
-            pal.border,
-        );
-        painter.rect_filled(
-            egui::Rect::from_min_size(c.min + vec2(4.0, 34.0), vec2(30.0, 4.0)),
-            2.0,
-            pal.text,
-        );
-        painter.rect_filled(
-            egui::Rect::from_min_size(c.min + vec2(4.0, 42.0), vec2(22.0, 3.0)),
-            2.0,
-            pal.weak,
-        );
-    }
-    painter.text(
-        egui::pos2(rect.center().x, preview.bottom() + 13.0),
-        egui::Align2::CENTER_CENTER,
+    let p = palette(ui.ctx());
+    let (rect, resp) =
+        ui.allocate_exact_size(vec2(ui.available_width(), 56.0), egui::Sense::click());
+    let (fill, stroke) = if on {
+        (p.accent_soft(), Stroke::new(1.5, p.accent_line))
+    } else if resp.hovered() {
+        (p.sidebar, Stroke::new(1.0, p.accent_line))
+    } else {
+        (p.sidebar, Stroke::new(1.0, p.line_strong))
+    };
+    ui.painter()
+        .rect(rect, p.radius_sm(), fill, stroke, egui::StrokeKind::Inside);
+    let thumb =
+        egui::Rect::from_center_size(rect.left_center() + vec2(26.0, 0.0), vec2(30.0, 30.0));
+    preview(ui.painter(), thumb);
+    ui.painter().text(
+        rect.left_center() + vec2(52.0, 0.0),
+        egui::Align2::LEFT_CENTER,
         label,
-        egui::FontId::proportional(13.0),
-        if selected { cur.text } else { cur.weak },
+        egui::FontId::proportional(14.0),
+        p.text,
     );
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
-
 fn position_combo(ui: &mut egui::Ui, i: &Localizer, id: &str, p: &mut OverlayPosition) {
     let opts = [
         (OverlayPosition::TopLeft, "pos-top-left"),

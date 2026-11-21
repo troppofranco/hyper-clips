@@ -2,6 +2,13 @@
 
 Formato: [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) · Versioni: [SemVer](https://semver.org/lang/it/).
 
+## [Unreleased]
+
+### Nuova interfaccia (stile Hyper Launcher)
+- Ridisegnata da capo sulla bozza: barra laterale con logo e tre voci (Libreria, Editor, Impostazioni); barra superiore arrotondata con ricerca e menu filtri, tasto "Salva clip", durata del replay e risoluzione modificabili al volo.
+- Schede della libreria con miniatura incassata e badge play, titolo, gioco e durata; sollevamento al passaggio del mouse.
+- Colori, forme e personalizzazione di Hyper Launcher: palette scura e chiara, accento viola predefinito con 5 colori più uno personalizzato, sfondo in tinta unita o sfumato con opacità dei pannelli, angoli netti/normali/arrotondati, pulsanti Standard o Liquid glass, animazioni complete/ridotte/spente. Restano i temi OLED e alto contrasto.
+- Vault e Privacy spostati nelle Impostazioni; momenti salienti come filtro della libreria.
 ## [0.2.1]
 
 ### Aggiornamenti

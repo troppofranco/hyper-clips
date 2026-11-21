@@ -18,6 +18,8 @@ use hc_library::{
 use crate::player::Player;
 
 const MAX_ITEMS: usize = 2000;
+/// Inner padding of a library card (thumbnail inset).
+const CARD_PAD: f32 = 8.0;
 const THUMB_CACHE: usize = 300;
 const THUMB_LOADS_PER_FRAME: usize = 12;
 const RELOAD_EVERY: Duration = Duration::from_secs(3);
@@ -29,14 +31,6 @@ enum Grouping {
     None,
     Game,
     Session,
-}
-
-/// Which page shows the library.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum View {
-    All,
-    /// Only items tagged by highlight detection.
-    Highlights,
 }
 
 /// Quick filter pills.
@@ -84,7 +78,7 @@ pub struct LibraryPage {
     edit_request: Option<(std::path::PathBuf, String)>,
     vault_request: Option<(i64, std::path::PathBuf)>,
     share: Option<crate::share_ui::ShareWindow>,
-    view: Option<View>,
+    highlights_only: bool,
     chip: Chip,
     total_count: usize,
     settings_request: bool,
@@ -118,7 +112,7 @@ impl LibraryPage {
             edit_request: None,
             vault_request: None,
             share: None,
-            view: None,
+            highlights_only: false,
             chip: Chip::All,
             total_count: 0,
             settings_request: false,
@@ -176,46 +170,53 @@ impl LibraryPage {
         std::mem::take(&mut self.settings_request)
     }
 
-    /// Rounded search field for the top bar.
-    pub fn search_box(&mut self, ui: &mut egui::Ui, hint: &str) {
+    /// Search field for the top bar, with the filter menu on its right.
+    pub fn search_box(&mut self, ui: &mut egui::Ui, i: &Localizer, width: f32) {
         let p = crate::theme::palette(ui.ctx());
+        let h = if p.compact { 30.0 } else { 36.0 };
         egui::Frame::new()
             .fill(p.card_hover)
-            .corner_radius(16)
-            .inner_margin(egui::Margin::symmetric(10, 5))
+            .stroke(egui::Stroke::new(1.0, p.line_strong))
+            .corner_radius(h / 2.0)
+            .inner_margin(egui::Margin::symmetric(14, 0))
             .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    crate::icons::icon(ui, crate::icons::Ic::Search, 14.0, p.weak);
+                ui.set_height(h);
+                ui.horizontal_centered(|ui| {
                     let r = ui.add(
                         egui::TextEdit::singleline(&mut self.filter.text)
                             .frame(egui::Frame::NONE)
-                            .hint_text(hint)
-                            .desired_width(260.0),
+                            .hint_text(i.tr("lib-search"))
+                            .desired_width((width - 70.0).max(120.0)),
                     );
                     if r.changed() {
                         self.dirty = true;
                     }
+                    crate::icons::icon(ui, crate::icons::Ic::Search, 15.0, p.weak);
+                    let active = self.chip != Chip::All
+                        || self.filter.game.is_some()
+                        || self.highlights_only
+                        || self.filter.tag.is_some();
+                    let (rect, resp) = ui.allocate_exact_size(Vec2::splat(24.0), Sense::click());
+                    if resp.hovered() || active {
+                        ui.painter().circle_filled(
+                            rect.center(),
+                            12.0,
+                            if active { p.accent_soft() } else { p.card },
+                        );
+                    }
+                    crate::icons::paint(
+                        ui.painter(),
+                        rect.shrink(5.0),
+                        crate::icons::Ic::Filter,
+                        if active { p.accent_line } else { p.weak },
+                    );
+                    let resp = resp
+                        .on_hover_text(i.tr("lib-view-options"))
+                        .on_hover_cursor(egui::CursorIcon::PointingHand);
+                    egui::Popup::menu(&resp).show(|ui| self.filter_menu(ui, i));
                 });
             });
     }
-
-    /// Share the most recent clip or recording on the LAN.
-    pub fn share_latest(&mut self, config: &Config) -> Result<(), String> {
-        let lib = self.lib.as_ref().ok_or("library unavailable")?;
-        let latest = lib
-            .list(&Filter::default(), Sort::Newest, 20, 0)
-            .map_err(|e| e.to_string())?
-            .into_iter()
-            .find(|it| it.kind != Kind::Screenshot)
-            .ok_or("no clips yet")?;
-        self.share = Some(crate::share_ui::ShareWindow::start(
-            &latest.path,
-            &latest.title,
-            &config.share,
-        )?);
-        Ok(())
-    }
-
     /// A clip the user asked to open in the editor.
     pub fn take_edit_request(&mut self) -> Option<(std::path::PathBuf, String)> {
         self.edit_request.take()
@@ -267,19 +268,7 @@ impl LibraryPage {
         Some(tex)
     }
 
-    pub fn ui(&mut self, ui: &mut egui::Ui, i: &Localizer, config: &Config, view: View) {
-        if self.view != Some(view) {
-            // Switching between Library and Highlights changes the base filter.
-            self.filter.tag =
-                (view == View::Highlights).then(|| hc_library::HIGHLIGHT_TAG.to_owned());
-            if view == View::Highlights {
-                self.chip = Chip::All;
-                self.filter.kind = None;
-                self.filter.favorites_only = false;
-            }
-            self.view = Some(view);
-            self.dirty = true;
-        }
+    pub fn ui(&mut self, ui: &mut egui::Ui, i: &Localizer, config: &Config) {
         if std::mem::take(&mut self.rescan_request) && self.scan.is_none() {
             let paths = self.paths.clone();
             self.start_scan(&paths, config);
@@ -303,11 +292,6 @@ impl LibraryPage {
         if let Some(e) = &self.error {
             ui.colored_label(ui.visuals().error_fg_color, e);
         }
-        if view == View::Highlights {
-            self.highlights_intro(ui, i, config);
-        }
-        self.toolbar(ui, i, view);
-        ui.add_space(8.0);
 
         if self.detail.is_some() {
             let p = crate::theme::palette(ui.ctx());
@@ -319,7 +303,7 @@ impl LibraryPage {
                         .fill(p.card)
                         .stroke(egui::Stroke::new(1.0, p.border))
                         .corner_radius(p.radius())
-                        .inner_margin(egui::Margin::same(14)),
+                        .inner_margin(egui::Margin::same(16)),
                 )
                 .show(ui, |ui| {
                     egui::ScrollArea::vertical().show(ui, |ui| self.detail_ui(ui, i, config));
@@ -329,7 +313,7 @@ impl LibraryPage {
             .frame(egui::Frame::NONE)
             .show(ui, |ui| {
                 if self.items.is_empty() {
-                    self.empty_state(ui, i, config, view);
+                    self.empty_state(ui, i, config);
                     return;
                 }
                 egui::ScrollArea::vertical()
@@ -354,38 +338,30 @@ impl LibraryPage {
         }
     }
 
-    fn highlights_intro(&mut self, ui: &mut egui::Ui, i: &Localizer, config: &Config) {
+    fn empty_state(&mut self, ui: &mut egui::Ui, i: &Localizer, config: &Config) {
         let p = crate::theme::palette(ui.ctx());
-        ui.label(RichText::new(i.tr("hl-intro")).color(p.weak));
-        if !config.highlights.auto_detect {
-            ui.horizontal(|ui| {
-                ui.label(RichText::new(i.tr("hl-auto-off")).color(ui.visuals().warn_fg_color));
-                if ui.button(i.tr("hl-open-settings")).clicked() {
-                    self.settings_request = true;
-                }
-            });
-        }
-        ui.add_space(6.0);
-    }
-
-    fn empty_state(&mut self, ui: &mut egui::Ui, i: &Localizer, config: &Config, view: View) {
-        let p = crate::theme::palette(ui.ctx());
-        ui.add_space(60.0);
+        ui.add_space(70.0);
         ui.vertical_centered(|ui| {
-            let icon = if view == View::Highlights {
+            let icon = if self.highlights_only {
                 crate::icons::Ic::Highlight
             } else {
-                crate::icons::Ic::Library
+                crate::icons::Ic::Logo
             };
-            crate::icons::icon(ui, icon, 54.0, p.accent);
-            ui.add_space(12.0);
+            crate::icons::icon(ui, icon, 58.0, p.accent_line);
+            ui.add_space(14.0);
             let filtered = !self.filter.text.is_empty()
                 || self.filter.game.is_some()
-                || self.chip != Chip::All;
-            let (title, body) = if filtered {
+                || self.chip != Chip::All
+                || self.filter.tag.is_some();
+            let (title, body) = if self.highlights_only {
+                let body = if config.highlights.auto_detect {
+                    i.tr("empty-hl-body")
+                } else {
+                    i.tr("hl-auto-off")
+                };
+                (i.tr("empty-hl-title"), body)
+            } else if filtered {
                 (i.tr("empty-filtered-title"), i.tr("empty-filtered-body"))
-            } else if view == View::Highlights {
-                (i.tr("empty-hl-title"), i.tr("empty-hl-body"))
             } else {
                 (
                     i.tr("empty-title"),
@@ -398,17 +374,19 @@ impl LibraryPage {
                     ),
                 )
             };
-            ui.label(RichText::new(title).size(20.0).strong());
+            ui.label(RichText::new(title).size(22.0).strong());
             ui.add_space(4.0);
             ui.label(RichText::new(body).color(p.weak));
-            ui.add_space(14.0);
-            if filtered {
-                if crate::widgets::primary_button(ui, &i.tr("empty-clear-filters")).clicked() {
-                    self.filter.text.clear();
-                    self.filter.game = None;
-                    self.set_chip(Chip::All);
+            ui.add_space(16.0);
+            if self.highlights_only && !config.highlights.auto_detect {
+                if crate::widgets::primary_button(ui, &i.tr("hl-open-settings")).clicked() {
+                    self.settings_request = true;
                 }
-            } else if view == View::All {
+            } else if filtered || self.highlights_only {
+                if crate::widgets::primary_button(ui, &i.tr("empty-clear-filters")).clicked() {
+                    self.clear_filters();
+                }
+            } else {
                 ui.label(
                     RichText::new(i.tr_args(
                         "empty-tips",
@@ -417,7 +395,7 @@ impl LibraryPage {
                             ("shot", &config.hotkeys.screenshot),
                         ],
                     ))
-                    .color(p.weak)
+                    .color(p.faint)
                     .size(12.5),
                 );
             }
@@ -429,6 +407,14 @@ impl LibraryPage {
                 });
             }
         });
+    }
+
+    fn clear_filters(&mut self) {
+        self.filter.text.clear();
+        self.filter.game = None;
+        self.filter.tag = None;
+        self.highlights_only = false;
+        self.set_chip(Chip::All);
     }
 
     fn set_chip(&mut self, chip: Chip) {
@@ -443,124 +429,109 @@ impl LibraryPage {
         self.dirty = true;
     }
 
-    fn toolbar(&mut self, ui: &mut egui::Ui, i: &Localizer, view: View) {
-        let p = crate::theme::palette(ui.ctx());
-        let before = (self.filter.clone(), self.sort, self.grouping);
-        ui.horizontal_wrapped(|ui| {
-            if view == View::All {
-                for (chip, key) in [
-                    (Chip::All, "chip-all"),
-                    (Chip::Starred, "chip-starred"),
-                    (Chip::Clips, "chip-clips"),
-                    (Chip::Recordings, "chip-recordings"),
-                    (Chip::Screenshots, "chip-screenshots"),
-                ] {
-                    if crate::widgets::chip(ui, &i.tr(key), self.chip == chip).clicked() {
-                        self.set_chip(chip);
-                    }
-                }
+    /// Show, game, highlights, tags, sort and grouping (filter menu).
+    fn filter_menu(&mut self, ui: &mut egui::Ui, i: &Localizer) {
+        let before = (
+            self.filter.clone(),
+            self.sort,
+            self.grouping,
+            self.highlights_only,
+        );
+        ui.set_min_width(240.0);
+        crate::widgets::label_caps(ui, &i.tr("lib-show"));
+        for (chip, key) in [
+            (Chip::All, "chip-all"),
+            (Chip::Starred, "chip-starred"),
+            (Chip::Clips, "chip-clips"),
+            (Chip::Recordings, "chip-recordings"),
+            (Chip::Screenshots, "chip-screenshots"),
+        ] {
+            if ui.radio(self.chip == chip, i.tr(key)).clicked() {
+                self.set_chip(chip);
             }
-            // Game filter as a chip with a drop-down.
-            let game_label = match &self.filter.game {
-                Some(g) => g.clone(),
-                None => i.tr("chip-by-game"),
-            };
-            let resp = crate::widgets::chip_ex(ui, &game_label, self.filter.game.is_some(), true);
-            egui::Popup::menu(&resp).show(|ui| {
-                ui.set_min_width(200.0);
+        }
+        ui.checkbox(&mut self.highlights_only, i.tr("lib-only-highlights"));
+        ui.separator();
+        crate::widgets::label_caps(ui, &i.tr("chip-by-game"));
+        if ui
+            .radio(self.filter.game.is_none(), i.tr("lib-all-games"))
+            .clicked()
+        {
+            self.filter.game = None;
+        }
+        for (g, n) in &self.games {
+            if ui
+                .radio(self.filter.game.as_ref() == Some(g), format!("{g}  ({n})"))
+                .clicked()
+            {
+                self.filter.game = Some(g.clone());
+            }
+        }
+        if !self.highlights_only && !self.tags.is_empty() {
+            ui.separator();
+            crate::widgets::label_caps(ui, &i.tr("lib-tags"));
+            if ui
+                .radio(self.filter.tag.is_none(), i.tr("lib-all-tags"))
+                .clicked()
+            {
+                self.filter.tag = None;
+            }
+            for (t, n) in &self.tags {
                 if ui
-                    .selectable_label(self.filter.game.is_none(), i.tr("lib-all-games"))
+                    .radio(self.filter.tag.as_ref() == Some(t), format!("{t}  ({n})"))
                     .clicked()
                 {
-                    self.filter.game = None;
+                    self.filter.tag = Some(t.clone());
                 }
-                for (g, n) in &self.games {
-                    if ui
-                        .selectable_label(
-                            self.filter.game.as_ref() == Some(g),
-                            format!("{g}  ({n})"),
-                        )
-                        .clicked()
-                    {
-                        self.filter.game = Some(g.clone());
-                    }
-                }
-            });
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let more = crate::widgets::icon_label_button(ui, crate::icons::Ic::More, "")
-                    .on_hover_text(i.tr("lib-view-options"));
-                egui::Popup::menu(&more).show(|ui| {
-                    ui.set_min_width(220.0);
-                    ui.label(RichText::new(i.tr("lib-sort")).color(p.weak).size(12.0));
-                    for (s, l) in [
-                        (Sort::Newest, "sort-newest"),
-                        (Sort::Oldest, "sort-oldest"),
-                        (Sort::Longest, "sort-longest"),
-                        (Sort::Shortest, "sort-shortest"),
-                        (Sort::Largest, "sort-largest"),
-                        (Sort::Title, "sort-title"),
-                    ] {
-                        ui.radio_value(&mut self.sort, s, i.tr(l));
-                    }
-                    ui.separator();
-                    ui.label(RichText::new(i.tr("lib-group")).color(p.weak).size(12.0));
-                    for (g, l) in [
-                        (Grouping::Date, "group-date"),
-                        (Grouping::Game, "group-game"),
-                        (Grouping::Session, "group-session"),
-                        (Grouping::None, "group-none"),
-                    ] {
-                        ui.radio_value(&mut self.grouping, g, i.tr(l));
-                    }
-                    if view == View::All && !self.tags.is_empty() {
-                        ui.separator();
-                        ui.label(RichText::new(i.tr("lib-tags")).color(p.weak).size(12.0));
-                        if ui
-                            .radio(self.filter.tag.is_none(), i.tr("lib-all-tags"))
-                            .clicked()
-                        {
-                            self.filter.tag = None;
-                        }
-                        for (t, n) in &self.tags {
-                            if ui
-                                .radio(self.filter.tag.as_ref() == Some(t), format!("{t}  ({n})"))
-                                .clicked()
-                            {
-                                self.filter.tag = Some(t.clone());
-                            }
-                        }
-                    }
-                    ui.separator();
-                    if ui.button(i.tr("lib-rescan")).clicked() {
-                        self.rescan_request = true;
-                    }
-                });
-                ui.label(
-                    RichText::new(i.tr_args(
-                        "lib-summary",
-                        &[
-                            ("count", &self.items.len().to_string()),
-                            (
-                                "size",
-                                &hc_core::sys::format_bytes(
-                                    self.items.iter().map(|x| x.size_bytes).sum(),
-                                ),
-                            ),
-                        ],
-                    ))
-                    .color(p.weak)
-                    .size(12.5),
-                );
-                if self.scan.is_some() {
-                    ui.spinner();
-                }
-            });
+            }
+        }
+        ui.separator();
+        crate::widgets::label_caps(ui, &i.tr("lib-sort"));
+        for (s, l) in [
+            (Sort::Newest, "sort-newest"),
+            (Sort::Oldest, "sort-oldest"),
+            (Sort::Longest, "sort-longest"),
+            (Sort::Largest, "sort-largest"),
+            (Sort::Title, "sort-title"),
+        ] {
+            ui.radio_value(&mut self.sort, s, i.tr(l));
+        }
+        ui.separator();
+        crate::widgets::label_caps(ui, &i.tr("lib-group"));
+        for (g, l) in [
+            (Grouping::Date, "group-date"),
+            (Grouping::Game, "group-game"),
+            (Grouping::Session, "group-session"),
+            (Grouping::None, "group-none"),
+        ] {
+            ui.radio_value(&mut self.grouping, g, i.tr(l));
+        }
+        ui.separator();
+        ui.horizontal(|ui| {
+            if ui.button(i.tr("empty-clear-filters")).clicked() {
+                self.clear_filters();
+            }
+            if ui.button(i.tr("lib-rescan")).clicked() {
+                self.rescan_request = true;
+            }
         });
-        if (self.filter.clone(), self.sort, self.grouping) != before {
+        if (
+            self.filter.clone(),
+            self.sort,
+            self.grouping,
+            self.highlights_only,
+        ) != before
+        {
+            self.filter.tag = if self.highlights_only {
+                Some(hc_library::HIGHLIGHT_TAG.to_owned())
+            } else if self.filter.tag.as_deref() == Some(hc_library::HIGHLIGHT_TAG) && before.3 {
+                None
+            } else {
+                self.filter.tag.clone()
+            };
             self.dirty = true;
         }
     }
-
     /// Group indices by local calendar day buckets (today, yesterday, ...).
     fn group_by_date(&self, i: &Localizer) -> Vec<hc_library::Group> {
         let now = std::time::SystemTime::now()
@@ -631,13 +602,12 @@ impl LibraryPage {
         let card_w = ((avail - gap * (cols - 1.0)) / cols)
             .floor()
             .min(target * 1.25);
-        let thumb_h = (card_w * 9.0 / 16.0).round();
-        let text_h = if config.appearance.show_details {
-            58.0
-        } else {
-            40.0
-        };
-        let card_h = thumb_h + text_h;
+        // Thumbnail inset by CARD_PAD on every side, then the text lines.
+        let thumb_h = ((card_w - 2.0 * CARD_PAD) * 9.0 / 16.0).round();
+        let lines = 1.0
+            + f32::from(u8::from(config.appearance.show_game_badge))
+            + f32::from(u8::from(config.appearance.show_details));
+        let card_h = CARD_PAD + thumb_h + 10.0 + lines * 20.0 + CARD_PAD;
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs() as i64)
@@ -1092,33 +1062,30 @@ pub fn icon_button(ui: &mut egui::Ui, icon: Icon, size: f32) -> egui::Response {
     resp
 }
 
-/// "2 hours ago · 01:22 · 156 MB"
-fn card_meta(i: &Localizer, item: &Item, now: i64) -> String {
-    let d = (now - item.created_at).max(0);
-    let ago = if d < 60 {
-        i.tr("ago-now")
-    } else if d < 3600 {
-        i.tr_args("ago-minutes", &[("n", &(d / 60).to_string())])
-    } else if d < 86_400 {
-        i.tr_args("ago-hours", &[("n", &(d / 3600).to_string())])
-    } else if d < 30 * 86_400 {
-        i.tr_args("ago-days", &[("n", &(d / 86_400).to_string())])
-    } else {
-        hc_core::sys::format_local(item.created_at)
-            .get(..10)
-            .unwrap_or("")
-            .to_owned()
-    };
-    let mut parts = vec![ago];
-    if item.duration_ms > 0 {
-        let s = item.duration_ms / 1000;
-        parts.push(format!("{:02}:{:02}", s / 60, s % 60));
+/// Duration line under a card ("1:22", "60s") or the kind for images.
+fn card_meta(i: &Localizer, item: &Item, _now: i64) -> String {
+    match item.kind {
+        Kind::Screenshot => i.tr("kind-screenshot"),
+        // Formats without a known length (e.g. GIF exports): show the format.
+        _ if item.duration_ms == 0 => item
+            .path
+            .extension()
+            .map(|e| e.to_string_lossy().to_uppercase())
+            .unwrap_or_default(),
+        _ => {
+            let s = item.duration_ms / 1000;
+            if s < 60 {
+                format!("{s}s")
+            } else {
+                format!("{}:{:02}", s / 60, s % 60)
+            }
+        }
     }
-    parts.push(hc_core::sys::format_bytes(item.size_bytes));
-    parts.join(" · ")
 }
 
-/// Draw one gallery card in `rect`. Returns (card clicked, star clicked).
+/// Draw one gallery card in `rect` (layout of the user's sketch: inset
+/// thumbnail with a play badge, then title, game and length). Returns
+/// (card clicked, star clicked).
 #[allow(clippy::too_many_arguments)]
 fn card_ui(
     ui: &mut egui::Ui,
@@ -1135,104 +1102,93 @@ fn card_ui(
     let id = ui.make_persistent_id(("card", item.id));
     let resp = ui.interact(rect, id, Sense::click());
     let hovered = resp.hovered();
-    let painter = ui.painter_at(rect.expand(2.0));
-    let r = p.radius;
-    let bg = if hovered { p.card_hover } else { p.card };
+    // Hover lift, as the launcher's cards (unless animations are off).
+    let lift = ui
+        .ctx()
+        .animate_bool_with_time(id.with("lift"), hovered, ui.style().animation_time);
+    let rect = rect.translate(Vec2::new(0.0, -3.0 * lift));
+    let painter = ui.painter_at(rect.expand(12.0));
+    if lift > 0.0 {
+        painter.rect_filled(
+            rect.translate(Vec2::new(0.0, 8.0)),
+            p.radius,
+            Color32::from_black_alpha((40.0 * lift) as u8),
+        );
+    }
+    let border = if selected {
+        p.accent_line
+    } else if hovered {
+        p.line_strong
+    } else {
+        p.border
+    };
     painter.rect(
         rect,
-        r,
-        bg,
-        egui::Stroke::new(1.0, if selected { p.accent } else { p.border }),
+        p.radius,
+        p.card,
+        egui::Stroke::new(if selected { 2.0 } else { 1.0 }, border),
         egui::StrokeKind::Inside,
     );
-    let thumb = egui::Rect::from_min_size(rect.min, Vec2::new(rect.width(), thumb_h));
-    let top = egui::CornerRadius {
-        nw: r,
-        ne: r,
-        sw: 0,
-        se: 0,
-    };
+    let thumb = egui::Rect::from_min_size(
+        rect.min + Vec2::splat(CARD_PAD),
+        Vec2::new(rect.width() - 2.0 * CARD_PAD, thumb_h),
+    );
+    let tr = p.radius_sm();
     match tex {
         Some(t) => {
             egui::Image::new((t.id(), thumb.size()))
-                .corner_radius(top)
+                .corner_radius(tr)
                 .paint_at(ui, thumb);
         }
         None => {
-            painter.rect_filled(thumb, top, p.sidebar);
-            let ic = match item.kind {
-                Kind::Screenshot => Ic::Camera,
-                _ => Ic::Play,
-            };
-            paint_ic(
-                &painter,
-                egui::Rect::from_center_size(thumb.center(), Vec2::splat(28.0)),
-                ic,
-                p.border,
-            );
+            painter.rect_filled(thumb, tr, p.card_hover);
+            // Diagonal hatching like the sketch's placeholder.
+            let hatch = ui.painter_at(thumb);
+            let s = egui::Stroke::new(1.0, p.border);
+            let mut x = thumb.left() - thumb.height();
+            while x < thumb.right() {
+                hatch.line_segment(
+                    [
+                        egui::pos2(x, thumb.bottom()),
+                        egui::pos2(x + thumb.height(), thumb.top()),
+                    ],
+                    s,
+                );
+                x += 14.0;
+            }
         }
     }
-    if hovered {
-        painter.rect_filled(thumb, top, Color32::from_white_alpha(10));
-    }
-    let pill = |text: &str, anchor: egui::Pos2, align_right: bool, icon: Option<(Ic, Color32)>| {
-        let g = painter.layout_no_wrap(
-            text.to_owned(),
-            egui::FontId::proportional(12.0),
-            Color32::WHITE,
-        );
-        let extra = if icon.is_some() { 16.0 } else { 0.0 };
-        let size = g.size() + Vec2::new(16.0 + extra, 8.0);
-        let min = if align_right {
-            anchor - Vec2::new(size.x, 0.0)
-        } else {
-            anchor
-        };
-        let pr = egui::Rect::from_min_size(min, size);
-        painter.rect_filled(pr, size.y / 2.0, p.badge);
-        if let Some((ic, c)) = icon {
-            paint_ic(
-                &painter,
-                egui::Rect::from_center_size(
-                    pr.left_center() + Vec2::new(13.0, 0.0),
-                    Vec2::splat(10.0),
-                ),
-                ic,
-                c,
-            );
-        }
-        painter.galley(pr.min + Vec2::new(8.0 + extra, 4.0), g, Color32::WHITE);
-        pr
+    painter.rect_stroke(
+        thumb,
+        tr,
+        egui::Stroke::new(1.0, p.border),
+        egui::StrokeKind::Inside,
+    );
+    // Play badge bottom-left (camera for screenshots, red dot for recordings).
+    let badge = egui::Rect::from_center_size(
+        egui::pos2(thumb.left() + 20.0, thumb.bottom() - 20.0),
+        Vec2::splat(28.0),
+    );
+    let badge_fill = if hovered {
+        p.primary_fill(false)
+    } else {
+        p.badge
     };
-    let m = 10.0;
-    if look.show_game_badge
-        && let Some(g) = item.game.as_deref().filter(|g| !g.is_empty())
-    {
-        pill(g, thumb.min + Vec2::splat(m), false, None);
-    }
-    // Bottom-left: kind / markers; bottom-right: duration.
-    let bl = egui::pos2(thumb.left() + m, thumb.bottom() - m - 22.0);
-    match item.kind {
-        Kind::Recording => {
-            pill("REC", bl, false, Some((Ic::Record, p.danger)));
-        }
-        Kind::Screenshot => {
-            pill("IMG", bl, false, Some((Ic::Camera, Color32::WHITE)));
-        }
-        Kind::Clip => {}
-    }
-    if item.duration_ms > 0 {
-        let s = item.duration_ms / 1000;
-        pill(
-            &format!("{:02}:{:02}", s / 60, s % 60),
-            egui::pos2(thumb.right() - m, thumb.bottom() - m - 22.0),
-            true,
-            None,
-        );
-    }
+    painter.circle_filled(badge.center(), 14.0, badge_fill);
+    let (ic, ic_color) = match item.kind {
+        Kind::Screenshot => (Ic::Camera, Color32::WHITE),
+        Kind::Recording => (Ic::Record, p.danger),
+        Kind::Clip => (Ic::Play, Color32::WHITE),
+    };
+    let ic_rect = if ic == Ic::Play {
+        badge.shrink(8.0).translate(Vec2::new(1.0, 0.0))
+    } else {
+        badge.shrink(7.0)
+    };
+    paint_ic(&painter, ic_rect, ic, ic_color);
     // Star: always visible when starred, otherwise on hover.
     let star_rect = egui::Rect::from_min_size(
-        egui::pos2(thumb.right() - m - 28.0, thumb.top() + m),
+        egui::pos2(thumb.right() - 34.0, thumb.top() + 6.0),
         Vec2::splat(28.0),
     );
     let star = ui.interact(star_rect, id.with("star"), Sense::click());
@@ -1245,24 +1201,42 @@ fn card_ui(
         };
         paint_ic(&painter, star_rect.shrink(6.0), ic, c);
     }
-    // Title (single line, elided) and details.
-    let text_x = rect.left() + 12.0;
-    let max_w = rect.width() - 24.0;
-    let mut job = egui::text::LayoutJob::single_section(
-        item.title.clone(),
-        egui::TextFormat::simple(egui::FontId::proportional(14.5), p.text),
-    );
-    job.wrap = egui::text::TextWrapping::truncate_at_width(max_w);
-    let title = ui.fonts_mut(|f| f.layout_job(job));
-    painter.galley(egui::pos2(text_x, thumb.bottom() + 10.0), title, p.text);
-    if look.show_details {
+    // Text: title, then game and length with their icons.
+    let x = rect.left() + CARD_PAD + 4.0;
+    let max_w = rect.width() - 2.0 * CARD_PAD - 8.0;
+    let mut y = thumb.bottom() + 10.0;
+    let line = |text: &str, font: egui::FontId, color: Color32, indent: f32| {
         let mut job = egui::text::LayoutJob::single_section(
-            meta.to_owned(),
-            egui::TextFormat::simple(egui::FontId::monospace(11.5), p.weak),
+            text.to_owned(),
+            egui::TextFormat::simple(font, color),
         );
-        job.wrap = egui::text::TextWrapping::truncate_at_width(max_w);
-        let g = ui.fonts_mut(|f| f.layout_job(job));
-        painter.galley(egui::pos2(text_x, thumb.bottom() + 32.0), g, p.weak);
+        job.wrap = egui::text::TextWrapping::truncate_at_width(max_w - indent);
+        ui.fonts_mut(|f| f.layout_job(job))
+    };
+    let title = line(&item.title, egui::FontId::proportional(14.5), p.text, 0.0);
+    painter.galley(egui::pos2(x, y), title, p.text);
+    y += 22.0;
+    let mut info = |icon: Ic, text: &str| {
+        paint_ic(
+            &painter,
+            egui::Rect::from_min_size(egui::pos2(x, y + 1.0), Vec2::splat(14.0)),
+            icon,
+            p.weak,
+        );
+        let g = line(text, egui::FontId::proportional(12.5), p.weak, 20.0);
+        painter.galley(egui::pos2(x + 20.0, y), g, p.weak);
+        y += 20.0;
+    };
+    if look.show_game_badge {
+        let game = item
+            .game
+            .as_deref()
+            .filter(|g| !g.is_empty())
+            .unwrap_or("Desktop");
+        info(Ic::Gamepad, game);
+    }
+    if look.show_details {
+        info(Ic::Clock, meta);
     }
     let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
     (resp.clicked() && !star.clicked(), star.clicked())
