@@ -3,6 +3,7 @@
 
 #![windows_subsystem = "windows"]
 
+mod anim;
 mod app;
 mod core_link;
 mod editor_page;

@@ -113,6 +113,7 @@ pub struct SettingsPage {
     category: Category,
     /// Look last applied to the UI (for the live preview).
     previewed: Option<Look>,
+    screen: crate::anim::Screen<Category>,
 }
 
 /// Per-action validation result for the hotkey editor (empty = valid).
@@ -142,6 +143,7 @@ impl SettingsPage {
             extra: crate::settings_extra::ExtraState::new(paths),
             category: Category::General,
             previewed: None,
+            screen: crate::anim::Screen::new(),
         }
     }
 
@@ -217,8 +219,9 @@ impl SettingsPage {
             self.previewed = Some(look);
         }
         let p = palette(ui.ctx());
-        let dirty = self.draft != self.saved;
-        if dirty {
+        let mut dirty = self.draft != self.saved;
+        {
+            // The save bar slides up when there are unsaved changes.
             egui::Panel::bottom("settings-save")
                 .frame(
                     egui::Frame::new()
@@ -227,7 +230,7 @@ impl SettingsPage {
                         .corner_radius(p.radius())
                         .inner_margin(egui::Margin::symmetric(14, 10)),
                 )
-                .show(ui, |ui| {
+                .show_collapsible(ui, &mut dirty, |ui| {
                     ui.horizontal(|ui| {
                         ui.label(RichText::new(i.tr("settings-unsaved")).strong());
                         if !problems.is_empty() {
@@ -282,6 +285,8 @@ impl SettingsPage {
                     .show(ui, |ui| {
                         // Leave room for the floating scroll bar.
                         ui.set_max_width((ui.available_width() - 18.0).min(860.0));
+                        let t = self.screen.show(ui.ctx(), self.category);
+                        crate::anim::apply_enter(ui, t);
                         if matches!(self.category, Category::Vault | Category::Privacy) {
                             embedded(self.category, ui);
                             return;

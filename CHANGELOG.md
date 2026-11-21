@@ -2,6 +2,20 @@
 
 Formato: [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) · Versioni: [SemVer](https://semver.org/lang/it/).
 
+## [Unreleased]
+
+### Animazioni
+- Animazioni fluide in tutto lo studio, con curve morbide (cubic-out) e durate come in Hyper Launcher:
+  - pagine e categorie delle impostazioni entrano in dissolvenza salendo;
+  - le schede della libreria compaiono a cascata, si sollevano con un'ombra al passaggio del mouse, il bordo di selezione e il badge play cambiano colore gradualmente;
+  - le miniature appaiono in dissolvenza; mentre si caricano c'è un riflesso "skeleton";
+  - voci di menu, pulsanti, pillole della barra superiore (con freccia che si ribalta), interruttori (con pallino che si allunga) e controlli a segmenti (con evidenziazione che scorre);
+  - pulsante principale con alone al passaggio e leggera compressione al clic;
+  - pannello dei dettagli che scorre da destra, barra "modifiche non salvate" che sale dal basso, notifiche e popup degli aggiornamenti in dissolvenza;
+  - indicatore di registrazione pulsante.
+- Tutto rispetta Personalizzazione → Animazioni (Complete, Ridotte = metà durata e niente cascate/riflessi, Spente) e l'opzione "riduci animazioni".
+- A riposo lo studio non ridisegna nulla (0% CPU misurato); le animazioni continue esistono solo durante una registrazione o un caricamento.
+- Correzione: con un file non riproducibile aperto nei dettagli, il player ridisegnava di continuo (circa 4% di un core).
 ## [0.3.0]
 
 ### Nuova interfaccia (stile Hyper Launcher)

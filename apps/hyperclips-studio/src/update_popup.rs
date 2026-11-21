@@ -20,6 +20,7 @@ pub enum PopupAction {
 pub struct UpdatePopup {
     rx: Option<Receiver<Option<Release>>>,
     release: Option<Release>,
+    shown_at: std::time::Instant,
     current: String,
 }
 
@@ -29,6 +30,7 @@ impl UpdatePopup {
             return Self {
                 rx: None,
                 release: None,
+                shown_at: std::time::Instant::now(),
                 current: String::new(),
             };
         }
@@ -61,6 +63,7 @@ impl UpdatePopup {
         Self {
             rx: spawned.ok().map(|_| rx),
             release: None,
+            shown_at: std::time::Instant::now(),
             current: current_text,
         }
     }
@@ -73,6 +76,7 @@ impl UpdatePopup {
                 tracing::info!(version = %r.version, "update available");
             }
             self.release = found;
+            self.shown_at = std::time::Instant::now();
             self.rx = None;
         }
         if self.rx.is_some() {
@@ -84,6 +88,10 @@ impl UpdatePopup {
         let mut close = false;
         let mut action = None;
         let resp = egui::Modal::new(egui::Id::unique("update-popup")).show(ctx, |ui| {
+            // Fades in and settles from slightly below.
+            let t = crate::anim::enter(ui.ctx(), self.shown_at, 0.0, 0.3);
+            ui.multiply_opacity(t);
+            ui.add_space(10.0 * (1.0 - t));
             ui.set_width(440.0);
             ui.horizontal(|ui| {
                 let (rect, _) = ui.allocate_exact_size(vec2(40.0, 40.0), egui::Sense::hover());

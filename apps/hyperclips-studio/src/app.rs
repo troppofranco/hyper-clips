@@ -42,6 +42,7 @@ pub struct StudioApp {
     disk_at: Option<Instant>,
     notice: Option<(String, Instant)>,
     update_popup: crate::update_popup::UpdatePopup,
+    screen: crate::anim::Screen<Page>,
 }
 
 fn clips_root(paths: &AppPaths, config: &Config) -> std::path::PathBuf {
@@ -90,6 +91,7 @@ impl StudioApp {
             disk: None,
             disk_at: None,
             notice: None,
+            screen: crate::anim::Screen::new(),
         }
     }
 
@@ -162,7 +164,9 @@ impl StudioApp {
                     Some(_) => (p.faint, "top-not-recording"),
                     None => (p.danger, "side-service-off"),
                 };
-                widgets::status_line(ui, color, &self.i18n.tr(key));
+                // Pulse only while recording: a constant animation would keep the UI repainting.
+                let live = status.as_ref().is_some_and(|s| s.recording);
+                widgets::status_line(ui, color, &self.i18n.tr(key), live);
                 if status.is_none()
                     && ui
                         .small_button(self.i18n.tr("side-service-start"))
@@ -299,12 +303,14 @@ impl StudioApp {
                 self.notice = None;
                 return;
             }
+            // Slides up and fades in, fades out at the end.
+            let t = crate::anim::toast(ctx, *at, 3.0);
             egui::Area::new(egui::Id::unique("app-notice"))
-                .anchor(egui::Align2::CENTER_BOTTOM, [0.0, -30.0])
+                .anchor(egui::Align2::CENTER_BOTTOM, [0.0, -30.0 + 14.0 * (1.0 - t)])
                 .show(ctx, |ui| {
+                    ui.multiply_opacity(t);
                     egui::Frame::popup(ui.style()).show(ui, |ui| ui.label(msg.as_str()));
                 });
-            ctx.request_repaint_after(Duration::from_millis(500));
         }
     }
 }
@@ -343,43 +349,48 @@ impl eframe::App for StudioApp {
                 top: 6,
                 bottom: 16,
             }))
-            .show(ui, |ui| match self.page {
-                Page::Library => {
-                    let cfg = self.settings.saved().clone();
-                    self.library.ui(ui, &self.i18n, &cfg);
-                    if let Some((path, title)) = self.library.take_edit_request() {
-                        self.editor.add_clip(&path, &title);
-                        self.page = Page::Editor;
+            .show(ui, |ui| {
+                // Each page fades and rises in when it opens.
+                let t = self.screen.show(ui.ctx(), self.page);
+                crate::anim::apply_enter(ui, t);
+                match self.page {
+                    Page::Library => {
+                        let cfg = self.settings.saved().clone();
+                        self.library.ui(ui, &self.i18n, &cfg);
+                        if let Some((path, title)) = self.library.take_edit_request() {
+                            self.editor.add_clip(&path, &title);
+                            self.page = Page::Editor;
+                        }
+                        if let Some((id, path)) = self.library.take_vault_request() {
+                            self.library.close_detail();
+                            self.vault.request_add(id, path);
+                            self.page = Page::Settings;
+                            self.settings.open_category(Category::Vault);
+                        }
+                        if self.library.take_settings_request() {
+                            self.page = Page::Settings;
+                            self.settings.open_category(Category::Library);
+                        }
                     }
-                    if let Some((id, path)) = self.library.take_vault_request() {
-                        self.library.close_detail();
-                        self.vault.request_add(id, path);
-                        self.page = Page::Settings;
-                        self.settings.open_category(Category::Vault);
-                    }
-                    if self.library.take_settings_request() {
-                        self.page = Page::Settings;
-                        self.settings.open_category(Category::Library);
-                    }
-                }
-                Page::Editor => self.editor.ui(ui, &self.i18n),
-                Page::Settings => {
-                    let cfg = self.settings.saved().clone();
-                    let (vault, privacy, paths, core) =
-                        (&mut self.vault, &mut self.privacy, &self.paths, &self.core);
-                    let i18n = &self.i18n;
-                    let mut embedded = |c: Category, ui: &mut egui::Ui| match c {
-                        Category::Vault => vault.ui(ui, i18n),
-                        Category::Privacy => privacy.ui(ui, i18n, paths, &cfg, core),
-                        _ => {}
-                    };
-                    if let Some(saved) =
-                        self.settings
-                            .ui(ui, &self.i18n, &self.paths, &self.core, &mut embedded)
-                    {
-                        theme::apply(ui.ctx(), &saved);
-                        self.i18n =
-                            Localizer::new(&saved.general.language, Some(&self.paths.exe_dir));
+                    Page::Editor => self.editor.ui(ui, &self.i18n),
+                    Page::Settings => {
+                        let cfg = self.settings.saved().clone();
+                        let (vault, privacy, paths, core) =
+                            (&mut self.vault, &mut self.privacy, &self.paths, &self.core);
+                        let i18n = &self.i18n;
+                        let mut embedded = |c: Category, ui: &mut egui::Ui| match c {
+                            Category::Vault => vault.ui(ui, i18n),
+                            Category::Privacy => privacy.ui(ui, i18n, paths, &cfg, core),
+                            _ => {}
+                        };
+                        if let Some(saved) =
+                            self.settings
+                                .ui(ui, &self.i18n, &self.paths, &self.core, &mut embedded)
+                        {
+                            theme::apply(ui.ctx(), &saved);
+                            self.i18n =
+                                Localizer::new(&saved.general.language, Some(&self.paths.exe_dir));
+                        }
                     }
                 }
             });

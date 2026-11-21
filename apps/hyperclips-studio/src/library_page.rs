@@ -70,7 +70,11 @@ pub struct LibraryPage {
     total_size: u64,
     dirty: bool,
     last_reload: Instant,
-    thumbs: HashMap<i64, (TextureHandle, u64)>,
+    /// Thumbnail textures: (texture, last use tick, when it was loaded).
+    thumbs: HashMap<i64, (TextureHandle, u64, Instant)>,
+    /// When the current set of cards appeared (cascade entrance).
+    appear: Instant,
+    shown_ids: Vec<i64>,
     tick: u64,
     detail: Option<Detail>,
     scan: Option<Receiver<Result<ScanReport, String>>>,
@@ -105,6 +109,8 @@ impl LibraryPage {
             dirty: true,
             last_reload: Instant::now(),
             thumbs: HashMap::new(),
+            appear: Instant::now(),
+            shown_ids: Vec::new(),
             tick: 0,
             detail: None,
             scan: None,
@@ -225,7 +231,19 @@ impl LibraryPage {
     fn reload(&mut self) {
         let Some(lib) = &self.lib else { return };
         match lib.list(&self.filter, self.sort, MAX_ITEMS, 0) {
-            Ok(items) => self.items = items,
+            Ok(items) => {
+                // A different set of cards (filter, search, sort) cascades in again.
+                let ids: Vec<i64> = items.iter().map(|it| it.id).collect();
+                if ids != self.shown_ids {
+                    let added_only = ids.len() > self.shown_ids.len()
+                        && self.shown_ids.iter().all(|id| ids.contains(id));
+                    if !added_only {
+                        self.appear = Instant::now();
+                    }
+                    self.shown_ids = ids;
+                }
+                self.items = items;
+            }
             Err(e) => self.error = Some(e.to_string()),
         }
         self.games = lib.games().unwrap_or_default();
@@ -241,11 +259,11 @@ impl LibraryPage {
         ctx: &egui::Context,
         item: &Item,
         budget: &mut usize,
-    ) -> Option<TextureHandle> {
+    ) -> Option<(TextureHandle, Instant)> {
         self.tick += 1;
-        if let Some((tex, used)) = self.thumbs.get_mut(&item.id) {
+        if let Some((tex, used, at)) = self.thumbs.get_mut(&item.id) {
             *used = self.tick;
-            return Some(tex.clone());
+            return Some((tex.clone(), *at));
         }
         if *budget == 0 {
             return None;
@@ -260,12 +278,13 @@ impl LibraryPage {
         );
         if self.thumbs.len() >= THUMB_CACHE {
             // Evict the least recently drawn thumbnail.
-            if let Some((&old, _)) = self.thumbs.iter().min_by_key(|(_, (_, u))| *u) {
+            if let Some((&old, _)) = self.thumbs.iter().min_by_key(|(_, (_, u, _))| *u) {
                 self.thumbs.remove(&old);
             }
         }
-        self.thumbs.insert(item.id, (tex.clone(), self.tick));
-        Some(tex)
+        let now = Instant::now();
+        self.thumbs.insert(item.id, (tex.clone(), self.tick, now));
+        Some((tex, now))
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui, i: &Localizer, config: &Config) {
@@ -293,7 +312,9 @@ impl LibraryPage {
             ui.colored_label(ui.visuals().error_fg_color, e);
         }
 
-        if self.detail.is_some() {
+        {
+            // The detail panel slides in from the right.
+            let mut open = self.detail.is_some();
             let p = crate::theme::palette(ui.ctx());
             egui::Panel::right("detail")
                 .resizable(true)
@@ -305,7 +326,7 @@ impl LibraryPage {
                         .corner_radius(p.radius())
                         .inner_margin(egui::Margin::same(16)),
                 )
-                .show(ui, |ui| {
+                .show_collapsible(ui, &mut open, |ui| {
                     egui::ScrollArea::vertical().show(ui, |ui| self.detail_ui(ui, i, config));
                 });
         }
@@ -327,9 +348,11 @@ impl LibraryPage {
         }
         if let Some((msg, at)) = &self.toast {
             if at.elapsed() < Duration::from_secs(3) {
+                let t = crate::anim::toast(ui.ctx(), *at, 3.0);
                 egui::Area::new(ui.scope_id().with("lib-toast"))
-                    .anchor(egui::Align2::CENTER_BOTTOM, [0.0, -40.0])
+                    .anchor(egui::Align2::CENTER_BOTTOM, [0.0, -40.0 + 14.0 * (1.0 - t)])
                     .show(ui.ctx(), |ui| {
+                        ui.multiply_opacity(t);
                         egui::Frame::popup(ui.style()).show(ui, |ui| ui.label(msg));
                     });
             } else {
@@ -613,6 +636,8 @@ impl LibraryPage {
             .map(|d| d.as_secs() as i64)
             .unwrap_or(0);
         let mut budget = THUMB_LOADS_PER_FRAME;
+        let rich = crate::anim::rich(ui.ctx());
+        let mut order = 0usize;
         let mut clicked = None;
         let mut fav_toggle = None;
         for g in groups {
@@ -652,7 +677,19 @@ impl LibraryPage {
                         if !ui.is_rect_visible(rect) {
                             continue;
                         }
-                        let tex = self.thumb(ui.ctx(), &item, &mut budget);
+                        // Cascade: each visible card starts a little later (max 12 steps).
+                        let delay = if rich {
+                            order.min(12) as f32 * 0.045
+                        } else {
+                            0.0
+                        };
+                        order += 1;
+                        let appear = crate::anim::enter(ui.ctx(), self.appear, delay, 0.45);
+                        let thumb = self.thumb(ui.ctx(), &item, &mut budget);
+                        let thumb_t = thumb
+                            .as_ref()
+                            .map_or(0.0, |(_, at)| crate::anim::enter(ui.ctx(), *at, 0.0, 0.3));
+                        let loading = thumb.is_none() && item.thumb.is_some();
                         let selected = self.detail.as_ref().is_some_and(|d| d.id == item.id);
                         let meta = card_meta(i, &item, now);
                         let (card_clicked, star_clicked) = card_ui(
@@ -660,7 +697,12 @@ impl LibraryPage {
                             rect,
                             thumb_h,
                             &item,
-                            tex.as_ref(),
+                            thumb.as_ref().map(|(t, _)| t),
+                            CardAnim {
+                                appear,
+                                thumb: thumb_t,
+                                loading,
+                            },
                             selected,
                             &config.appearance,
                             &meta,
@@ -763,7 +805,8 @@ impl LibraryPage {
                     }
                 }
             }
-            if !p.is_paused() {
+            // Repaint for new frames only while really playing.
+            if !p.is_paused() && !p.ended() && p.error().is_none() {
                 ui.ctx().request_repaint_after(Duration::from_millis(15));
             }
         }
@@ -1086,6 +1129,16 @@ fn card_meta(i: &Localizer, item: &Item, _now: i64) -> String {
 /// Draw one gallery card in `rect` (layout of the user's sketch: inset
 /// thumbnail with a play badge, then title, game and length). Returns
 /// (card clicked, star clicked).
+/// Animation state of one card.
+struct CardAnim {
+    /// Entrance progress (cascade), 0..1.
+    appear: f32,
+    /// Thumbnail fade-in, 0..1.
+    thumb: f32,
+    /// Thumbnail still being decoded (shimmer placeholder).
+    loading: bool,
+}
+
 #[allow(clippy::too_many_arguments)]
 fn card_ui(
     ui: &mut egui::Ui,
@@ -1093,6 +1146,7 @@ fn card_ui(
     thumb_h: f32,
     item: &Item,
     tex: Option<&TextureHandle>,
+    anim: CardAnim,
     selected: bool,
     look: &hc_core::config::Appearance,
     meta: &str,
@@ -1102,12 +1156,14 @@ fn card_ui(
     let id = ui.make_persistent_id(("card", item.id));
     let resp = ui.interact(rect, id, Sense::click());
     let hovered = resp.hovered();
-    // Hover lift, as the launcher's cards (unless animations are off).
-    let lift = ui
-        .ctx()
-        .animate_bool_with_time(id.with("lift"), hovered, ui.style().animation_time);
-    let rect = rect.translate(Vec2::new(0.0, -3.0 * lift));
-    let painter = ui.painter_at(rect.expand(12.0));
+    let ctx = ui.ctx().clone();
+    // Hover lift, as the launcher's cards (translateY(-3px) + shadow).
+    let lift = crate::anim::flag(&ctx, id.with("lift"), hovered, 0.22);
+    let sel = crate::anim::flag(&ctx, id.with("sel"), selected, 0.2);
+    // Entrance: rise 12 px while fading in.
+    let rect = rect.translate(Vec2::new(0.0, 12.0 * (1.0 - anim.appear) - 3.0 * lift));
+    let mut painter = ui.painter_at(rect.expand(12.0));
+    painter.multiply_opacity(anim.appear);
     if lift > 0.0 {
         painter.rect_filled(
             rect.translate(Vec2::new(0.0, 8.0)),
@@ -1115,18 +1171,16 @@ fn card_ui(
             Color32::from_black_alpha((40.0 * lift) as u8),
         );
     }
-    let border = if selected {
-        p.accent_line
-    } else if hovered {
-        p.line_strong
-    } else {
-        p.border
-    };
+    let border = crate::anim::mix(
+        crate::anim::mix(p.border, p.line_strong, lift),
+        p.accent_line,
+        sel,
+    );
     painter.rect(
         rect,
         p.radius,
         p.card,
-        egui::Stroke::new(if selected { 2.0 } else { 1.0 }, border),
+        egui::Stroke::new(1.0 + sel, border),
         egui::StrokeKind::Inside,
     );
     let thumb = egui::Rect::from_min_size(
@@ -1134,16 +1188,14 @@ fn card_ui(
         Vec2::new(rect.width() - 2.0 * CARD_PAD, thumb_h),
     );
     let tr = p.radius_sm();
-    match tex {
-        Some(t) => {
-            egui::Image::new((t.id(), thumb.size()))
-                .corner_radius(tr)
-                .paint_at(ui, thumb);
-        }
-        None => {
-            painter.rect_filled(thumb, tr, p.card_hover);
+    // Placeholder (hatched, with a shimmer while decoding) under the image,
+    // which fades in once loaded.
+    if anim.thumb < 1.0 {
+        painter.rect_filled(thumb, tr, p.card_hover);
+        {
             // Diagonal hatching like the sketch's placeholder.
-            let hatch = ui.painter_at(thumb);
+            let mut hatch = ui.painter_at(thumb);
+            hatch.multiply_opacity(anim.appear * (1.0 - anim.thumb));
             let s = egui::Stroke::new(1.0, p.border);
             let mut x = thumb.left() - thumb.height();
             while x < thumb.right() {
@@ -1156,7 +1208,37 @@ fn card_ui(
                 );
                 x += 14.0;
             }
+            if anim.loading && crate::anim::rich(&ctx) {
+                // Skeleton shimmer: a soft light band sweeping across.
+                let t = crate::anim::pulse(&ctx, 1.3);
+                let band = thumb.width() * 0.45;
+                let x0 = thumb.left() - band + (thumb.width() + band) * t;
+                let light = egui::Color32::from_white_alpha(if p.dark { 14 } else { 60 });
+                let mut mesh = egui::Mesh::default();
+                let (top, bottom) = (thumb.top(), thumb.bottom());
+                for (x, c) in [
+                    (x0, egui::Color32::TRANSPARENT),
+                    (x0 + band / 2.0, light),
+                    (x0 + band, egui::Color32::TRANSPARENT),
+                ] {
+                    mesh.colored_vertex(egui::pos2(x, top), c);
+                    mesh.colored_vertex(egui::pos2(x, bottom), c);
+                }
+                for k in 0..2u32 {
+                    let b = k * 2;
+                    mesh.add_triangle(b, b + 1, b + 2);
+                    mesh.add_triangle(b + 1, b + 2, b + 3);
+                }
+                hatch.add(egui::Shape::mesh(mesh));
+            }
         }
+    }
+    if let Some(t) = tex {
+        let alpha = anim.thumb * anim.appear;
+        egui::Image::new((t.id(), thumb.size()))
+            .corner_radius(tr)
+            .tint(egui::Color32::WHITE.gamma_multiply(alpha))
+            .paint_at(ui, thumb);
     }
     painter.rect_stroke(
         thumb,
@@ -1169,12 +1251,9 @@ fn card_ui(
         egui::pos2(thumb.left() + 20.0, thumb.bottom() - 20.0),
         Vec2::splat(28.0),
     );
-    let badge_fill = if hovered {
-        p.primary_fill(false)
-    } else {
-        p.badge
-    };
-    painter.circle_filled(badge.center(), 14.0, badge_fill);
+    // The play badge takes the accent and grows a little on hover.
+    let badge_fill = crate::anim::mix(p.badge, p.primary_fill(false), lift);
+    painter.circle_filled(badge.center(), 14.0 + 2.0 * lift, badge_fill);
     let (ic, ic_color) = match item.kind {
         Kind::Screenshot => (Ic::Camera, Color32::WHITE),
         Kind::Recording => (Ic::Record, p.danger),

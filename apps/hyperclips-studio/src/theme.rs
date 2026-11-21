@@ -298,7 +298,10 @@ pub fn visuals(p: &Palette, theme: Theme) -> Visuals {
 pub fn apply(ctx: &egui::Context, cfg: &Config) {
     let g = &cfg.general;
     let a = &cfg.appearance;
-    let p = palette_for(g.theme, a);
+    let mut p = palette_for(g.theme, a);
+    if g.reduce_motion {
+        p.animations = Animations::Off;
+    }
     let v = visuals(&p, g.theme);
     let pref = if p.dark {
         egui::ThemePreference::Dark
