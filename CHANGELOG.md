@@ -2,7 +2,7 @@
 
 Formato: [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) · Versioni: [SemVer](https://semver.org/lang/it/).
 
-## [Unreleased]
+## [0.3.1]
 
 ### Animazioni
 - Animazioni fluide in tutto lo studio, con curve morbide (cubic-out) e durate come in Hyper Launcher:

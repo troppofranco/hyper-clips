@@ -1633,7 +1633,7 @@ dependencies = [
 
 [[package]]
 name = "hc-bench"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "crossbeam-channel",
  "hc-capture",
@@ -1647,14 +1647,14 @@ dependencies = [
 
 [[package]]
 name = "hc-buffer"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "hc-core",
 ]
 
 [[package]]
 name = "hc-capture"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "crossbeam-channel",
  "hc-core",
@@ -1668,7 +1668,7 @@ dependencies = [
 
 [[package]]
 name = "hc-core"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "fluent-bundle",
  "postcard",
@@ -1684,7 +1684,7 @@ dependencies = [
 
 [[package]]
 name = "hc-detect"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "serde",
  "toml",
@@ -1694,7 +1694,7 @@ dependencies = [
 
 [[package]]
 name = "hc-editor"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "gif",
  "hc-capture",
@@ -1710,7 +1710,7 @@ dependencies = [
 
 [[package]]
 name = "hc-encode"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "hc-core",
  "thiserror 2.0.21",
@@ -1720,7 +1720,7 @@ dependencies = [
 
 [[package]]
 name = "hc-hotkeys"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "thiserror 2.0.21",
  "tracing",
@@ -1729,7 +1729,7 @@ dependencies = [
 
 [[package]]
 name = "hc-library"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "hc-capture",
  "hc-core",
@@ -1742,7 +1742,7 @@ dependencies = [
 
 [[package]]
 name = "hc-plugins"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -1755,7 +1755,7 @@ dependencies = [
 
 [[package]]
 name = "hc-recorder"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "crossbeam-channel",
  "hc-buffer",
@@ -1770,7 +1770,7 @@ dependencies = [
 
 [[package]]
 name = "hc-share"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "getrandom 0.4.3",
  "qrcode",
@@ -1781,7 +1781,7 @@ dependencies = [
 
 [[package]]
 name = "hc-updater"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "hc-core",
  "semver",
@@ -1795,7 +1795,7 @@ dependencies = [
 
 [[package]]
 name = "hc-updater-helper"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "windows",
  "zip",
@@ -1803,7 +1803,7 @@ dependencies = [
 
 [[package]]
 name = "hc-vault"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "argon2",
  "chacha20poly1305",
@@ -1866,7 +1866,7 @@ dependencies = [
 
 [[package]]
 name = "hyperclips"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "clap",
  "crossbeam-channel",
@@ -1889,7 +1889,7 @@ dependencies = [
 
 [[package]]
 name = "hyperclips-studio"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "eframe",
  "hc-capture",
