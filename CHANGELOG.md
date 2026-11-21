@@ -2,7 +2,7 @@
 
 Formato: [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) · Versioni: [SemVer](https://semver.org/lang/it/).
 
-## [Unreleased]
+## [0.3.0]
 
 ### Nuova interfaccia (stile Hyper Launcher)
 - Ridisegnata da capo sulla bozza: barra laterale con logo e tre voci (Libreria, Editor, Impostazioni); barra superiore arrotondata con ricerca e menu filtri, tasto "Salva clip", durata del replay e risoluzione modificabili al volo.
