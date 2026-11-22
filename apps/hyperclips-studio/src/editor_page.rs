@@ -1161,7 +1161,10 @@ impl EditorPage {
             format!("{height}p")
         };
         let detail = match cap {
-            Some(mb) => format!("{res} · {fmt} · ≤{mb:.0} MB"),
+            Some(mb) => format!(
+                "{res} · {fmt} · {}",
+                i.tr_args("ed-max-mb", &[("mb", &format!("{mb:.0}"))])
+            ),
             None => format!("{res} · {fmt}"),
         };
         painter.text(

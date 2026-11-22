@@ -206,16 +206,20 @@ fn summary(notes: &str) -> String {
         .map(str::trim)
         .filter(|l| l.starts_with("- "))
         .take(8)
-        .map(|l| {
-            format!(
-                "· {}",
-                l.trim_start_matches("- ")
-                    .replace("**", "")
-                    .replace('`', "")
-            )
-        })
+        .map(|l| format!("· {}", plain(l.trim_start_matches("- "))))
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// Strip markdown and swap symbols the bundled font cannot draw (they
+/// would show as empty boxes).
+fn plain(s: &str) -> String {
+    s.replace("**", "")
+        .replace('`', "")
+        .replace('→', ">")
+        .replace('←', "<")
+        .replace('≤', "<=")
+        .replace('≥', ">=")
 }
 
 #[cfg(test)]
@@ -227,5 +231,9 @@ mod tests {
         let s =
             summary("## [0.2.0]\n\n### UI\n- **New** sidebar with `icons`\n- Cards\n\nVerify: x\n");
         assert_eq!(s, "· New sidebar with icons\n· Cards");
+        assert_eq!(
+            plain("Settings → Updates, ≤10 MB"),
+            "Settings > Updates, <=10 MB"
+        );
     }
 }

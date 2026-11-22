@@ -2,6 +2,11 @@
 
 Formato: [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) · Versioni: [SemVer](https://semver.org/lang/it/).
 
+## [Unreleased]
+
+### Correzioni
+- Nel popup degli aggiornamenti e nell'interfaccia i simboli che il carattere non sa disegnare (frecce, minore o uguale) non compaiono più come quadratini.
+
 ## [0.3.3]
 
 ### Interfaccia
