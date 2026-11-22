@@ -396,7 +396,7 @@ impl eframe::App for StudioApp {
             });
         self.notice_toast(&ctx);
         if let Some(crate::update_popup::PopupAction::Ignore(v)) =
-            self.update_popup.ui(&ctx, &self.i18n)
+            self.update_popup.ui(&ctx, &self.i18n, &self.paths)
         {
             self.settings.ignore_version(&v, &self.paths);
         }

@@ -526,3 +526,9 @@ top-keybind = Save clip
 top-keybind-hint = The key that saves the replay. Click to change it.
 top-replay-hint = How many seconds the replay keeps
 top-resolution-hint = Clip resolution
+
+## In-app update
+pop-update-now = Update now
+pop-retry = Try again
+pop-installing = Installing: Hyper Clips closes and reopens by itself.
+pop-install-hint = The update is downloaded from GitHub, verified and installed. Clips and settings are kept.

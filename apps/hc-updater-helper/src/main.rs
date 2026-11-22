@@ -3,6 +3,7 @@
 //! Runs from a temp copy (the install folder is being replaced):
 //!   hc-updater-helper --package <file> --mode installed|portable
 //!                     --target <install dir> --data <data dir> [--wait <pid>]...
+//!                     [--reopen <studio exe>]
 //!
 //! 1. wait for the app processes to exit;
 //! 2. back up the program files (never user data);
@@ -34,18 +35,21 @@ struct Args {
     target: PathBuf,
     data: PathBuf,
     wait: Vec<u32>,
+    /// Program to start once done (the studio), whatever the outcome.
+    reopen: Option<PathBuf>,
 }
 
 fn parse_args() -> Option<Args> {
     let mut a = std::env::args().skip(1);
-    let (mut package, mut mode, mut target, mut data, mut wait) =
-        (None, None, None, None, Vec::new());
+    let (mut package, mut mode, mut target, mut data, mut wait, mut reopen) =
+        (None, None, None, None, Vec::new(), None);
     while let Some(k) = a.next() {
         match k.as_str() {
             "--package" => package = a.next().map(PathBuf::from),
             "--mode" => mode = a.next(),
             "--target" => target = a.next().map(PathBuf::from),
             "--data" => data = a.next().map(PathBuf::from),
+            "--reopen" => reopen = a.next().map(PathBuf::from),
             "--wait" => {
                 if let Some(p) = a.next().and_then(|s| s.parse().ok()) {
                     wait.push(p);
@@ -60,6 +64,7 @@ fn parse_args() -> Option<Args> {
         target: target?,
         data: data?,
         wait,
+        reopen,
     })
 }
 
@@ -281,13 +286,23 @@ fn main() -> ExitCode {
         args.package.display(),
         args.target.display()
     ));
-    match run(&args, &mut log) {
+    let code = match run(&args, &mut log) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             log.line(&format!("error: {e}"));
             ExitCode::FAILURE
         }
+    };
+    // Bring the window back: on the new version, or on the restored one.
+    if let Some(exe) = &args.reopen
+        && exe.exists()
+    {
+        match std::process::Command::new(exe).spawn() {
+            Ok(_) => log.line("studio reopened"),
+            Err(e) => log.line(&format!("cannot reopen the studio: {e}")),
+        }
     }
+    code
 }
 
 #[cfg(test)]

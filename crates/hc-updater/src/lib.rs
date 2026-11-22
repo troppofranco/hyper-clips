@@ -328,6 +328,7 @@ pub fn launch_helper(
     install_dir: &Path,
     data_dir: &Path,
     wait_pids: &[u32],
+    reopen: Option<&Path>,
 ) -> Result<()> {
     let tmp = std::env::temp_dir().join(format!("hc-updater-{}", std::process::id()));
     std::fs::create_dir_all(&tmp)?;
@@ -347,6 +348,9 @@ pub fn launch_helper(
         .arg(data_dir);
     for pid in wait_pids {
         cmd.arg("--wait").arg(pid.to_string());
+    }
+    if let Some(exe) = reopen {
+        cmd.arg("--reopen").arg(exe);
     }
     cmd.spawn()?;
     Ok(())

@@ -2,7 +2,8 @@
 //!
 //! Checks GitHub once in the background (respecting the update settings:
 //! never when checks are off, channel, ignored versions) and, if a newer
-//! release exists, shows its version and a link to its GitHub page.
+//! release exists, shows its version and what is new. "Update now"
+//! downloads, verifies and installs it in place (see `installer`).
 
 use std::sync::mpsc::{Receiver, channel};
 
@@ -11,6 +12,8 @@ use hc_core::config::{Config, UpdateChannel, UpdateCheck};
 use hc_core::i18n::Localizer;
 use hc_core::paths::AppPaths;
 use hc_updater::{Channel, Release};
+
+use crate::installer::{Installer, State};
 
 /// What the app must persist after the pop-up closes.
 pub enum PopupAction {
@@ -22,17 +25,20 @@ pub struct UpdatePopup {
     release: Option<Release>,
     shown_at: std::time::Instant,
     current: String,
+    installer: Installer,
 }
 
 impl UpdatePopup {
     pub fn start(paths: &AppPaths, config: &Config) -> Self {
+        let mut me = Self {
+            rx: None,
+            release: None,
+            shown_at: std::time::Instant::now(),
+            current: hc_core::VERSION.to_owned(),
+            installer: Installer::new(),
+        };
         if config.updates.check == UpdateCheck::Never {
-            return Self {
-                rx: None,
-                release: None,
-                shown_at: std::time::Instant::now(),
-                current: String::new(),
-            };
+            return me;
         }
         let ch = match config.updates.channel {
             UpdateChannel::Stable => Channel::Stable,
@@ -41,9 +47,9 @@ impl UpdatePopup {
         let ignored = config.updates.ignored_versions.clone();
         hc_updater::set_network_log(paths.log_dir.join("network.log"));
         let current = current_version();
-        let current_text = current
-            .as_ref()
-            .map_or_else(|_| hc_core::VERSION.to_owned(), ToString::to_string);
+        if let Ok(v) = &current {
+            me.current = v.to_string();
+        }
         let (tx, rx) = channel();
         let spawned = std::thread::Builder::new()
             .name("update-popup".into())
@@ -60,15 +66,17 @@ impl UpdatePopup {
                         });
                 let _ = tx.send(found);
             });
-        Self {
-            rx: spawned.ok().map(|_| rx),
-            release: None,
-            shown_at: std::time::Instant::now(),
-            current: current_text,
-        }
+        me.rx = spawned.ok().map(|_| rx);
+        me
     }
 
-    pub fn ui(&mut self, ctx: &egui::Context, i: &Localizer) -> Option<PopupAction> {
+    pub fn ui(
+        &mut self,
+        ctx: &egui::Context,
+        i: &Localizer,
+        paths: &AppPaths,
+    ) -> Option<PopupAction> {
+        self.installer.poll(paths, ctx);
         if let Some(rx) = &self.rx
             && let Ok(found) = rx.try_recv()
         {
@@ -84,7 +92,6 @@ impl UpdatePopup {
         }
         let r = self.release.clone()?;
         let p = crate::theme::palette(ctx);
-        let url = r.page_url();
         let mut close = false;
         let mut action = None;
         let resp = egui::Modal::new(egui::Id::unique("update-popup")).show(ctx, |ui| {
@@ -124,24 +131,59 @@ impl UpdatePopup {
                     });
                 ui.add_space(8.0);
             }
-            ui.label(i.tr("pop-download-hint"));
-            ui.hyperlink_to(RichText::new(&url).size(12.5), &url);
+            match &self.installer.state {
+                State::Downloading(prog) => {
+                    ui.label(i.tr_args("upd-downloading", &[("version", &r.version.to_string())]));
+                    ui.add(
+                        egui::ProgressBar::new(*prog)
+                            .show_percentage()
+                            .animate(true),
+                    );
+                }
+                State::Installing => {
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label(i.tr("pop-installing"));
+                    });
+                }
+                State::Failed(e) => {
+                    ui.colored_label(
+                        ui.visuals().error_fg_color,
+                        i.tr_args("upd-error", &[("error", e)]),
+                    );
+                }
+                State::Idle => {
+                    ui.label(
+                        RichText::new(i.tr("pop-install-hint"))
+                            .color(p.weak)
+                            .size(12.5),
+                    );
+                }
+            }
             ui.add_space(12.0);
-            ui.horizontal(|ui| {
-                if crate::widgets::primary_button(ui, &i.tr("pop-open-github")).clicked() {
-                    ui.ctx().open_url(egui::OpenUrl::new_tab(&url));
-                    close = true;
-                }
-                if ui.button(i.tr("upd-later")).clicked() {
-                    close = true;
-                }
-                if ui.button(i.tr("upd-ignore")).clicked() {
-                    action = Some(PopupAction::Ignore(r.version.to_string()));
-                    close = true;
-                }
+            let busy = self.installer.busy();
+            ui.add_enabled_ui(!busy, |ui| {
+                ui.horizontal(|ui| {
+                    let label = if matches!(self.installer.state, State::Failed(_)) {
+                        i.tr("pop-retry")
+                    } else {
+                        i.tr("pop-update-now")
+                    };
+                    if crate::widgets::primary_button(ui, &label).clicked() {
+                        self.installer.start(&r, paths);
+                    }
+                    if ui.button(i.tr("upd-later")).clicked() {
+                        close = true;
+                    }
+                    if ui.button(i.tr("upd-ignore")).clicked() {
+                        action = Some(PopupAction::Ignore(r.version.to_string()));
+                        close = true;
+                    }
+                });
             });
         });
-        if close || resp.should_close() {
+        // While downloading or installing the pop-up cannot be dismissed.
+        if close || (resp.should_close() && !self.installer.busy()) {
             self.release = None;
         }
         action

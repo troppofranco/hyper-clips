@@ -8,6 +8,7 @@ mod app;
 mod core_link;
 mod editor_page;
 mod icons;
+mod installer;
 mod library_page;
 mod player;
 mod privacy_page;
