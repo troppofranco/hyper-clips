@@ -36,7 +36,6 @@ pub struct StudioApp {
     library: LibraryPage,
     editor: EditorPage,
     vault: crate::vault_page::VaultPage,
-    privacy: crate::privacy_page::PrivacyPage,
     core: CoreLink,
     disk: Option<(u64, u64)>,
     disk_at: Option<Instant>,
@@ -82,7 +81,6 @@ impl StudioApp {
             library: LibraryPage::new(&paths, &config),
             editor: EditorPage::new(&paths, clips_root(&paths, &config)),
             vault: crate::vault_page::VaultPage::new(&paths, clips_root(&paths, &config)),
-            privacy: crate::privacy_page::PrivacyPage::new(),
             update_popup: crate::update_popup::UpdatePopup::start(&paths, &config),
             settings: SettingsPage::new(config, &paths),
             page,
@@ -205,18 +203,9 @@ impl StudioApp {
             .corner_radius(p.radius())
             .inner_margin(Margin::symmetric(14, 10))
             .show(ui, |ui| {
+                // Quick controls on the right; the search (or title) takes all
+                // the remaining width, so the bar scales with the window.
                 ui.horizontal(|ui| {
-                    if self.page == Page::Library {
-                        let w = (ui.available_width() - 360.0).clamp(220.0, 460.0);
-                        self.library.search_box(ui, &self.i18n, w);
-                    } else {
-                        let title = match self.page {
-                            Page::Editor => "nav-editor",
-                            _ => "nav-settings",
-                        };
-                        ui.add_space(6.0);
-                        ui.label(RichText::new(self.i18n.tr(title)).size(18.0).strong());
-                    }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         // Resolution.
                         let r = widgets::bar_pill(
@@ -283,6 +272,20 @@ impl StudioApp {
                             self.page = Page::Settings;
                             self.settings.open_category(Category::Hotkeys);
                         }
+                        ui.add_space(14.0);
+                        ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                            if self.page == Page::Library {
+                                let w = ui.available_width();
+                                self.library.search_box(ui, &self.i18n, w);
+                            } else {
+                                let title = match self.page {
+                                    Page::Editor => "nav-editor",
+                                    _ => "nav-settings",
+                                };
+                                ui.add_space(6.0);
+                                ui.label(RichText::new(self.i18n.tr(title)).size(18.0).strong());
+                            }
+                        });
                     });
                 });
             });
@@ -323,31 +326,43 @@ impl eframe::App for StudioApp {
         }
         theme::paint_background(&ctx);
         let p = palette(&ctx);
+        // Sidebar as a floating rounded card, like every other surface.
         egui::Panel::left("nav")
             .resizable(false)
-            .exact_size(220.0)
-            .frame(
+            .exact_size(236.0)
+            .show_separator_line(false)
+            .frame(egui::Frame::new().fill(p.bg).inner_margin(Margin {
+                left: 14,
+                right: 0,
+                top: 14,
+                bottom: 14,
+            }))
+            .show(ui, |ui| {
                 egui::Frame::new()
                     .fill(p.sidebar)
                     .stroke(Stroke::new(1.0, p.border))
-                    .inner_margin(Margin::symmetric(14, 0)),
-            )
-            .show(ui, |ui| self.sidebar(ui));
+                    .corner_radius(p.radius())
+                    .inner_margin(Margin::symmetric(12, 0))
+                    .show(ui, |ui| {
+                        ui.set_min_size(ui.available_size());
+                        self.sidebar(ui);
+                    });
+            });
         egui::Panel::top("top")
             .show_separator_line(false)
             .frame(egui::Frame::new().fill(p.bg).inner_margin(Margin {
-                left: 24,
-                right: 24,
-                top: 18,
-                bottom: 14,
+                left: 14,
+                right: 14,
+                top: 14,
+                bottom: 12,
             }))
             .show(ui, |ui| self.top_bar(ui));
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(p.bg).inner_margin(Margin {
-                left: 24,
-                right: 24,
+                left: 18,
+                right: 18,
                 top: 6,
-                bottom: 16,
+                bottom: 14,
             }))
             .show(ui, |ui| {
                 // Each page fades and rises in when it opens.
@@ -372,16 +387,19 @@ impl eframe::App for StudioApp {
                             self.settings.open_category(Category::Library);
                         }
                     }
-                    Page::Editor => self.editor.ui(ui, &self.i18n),
+                    Page::Editor => {
+                        self.editor.ui(ui, &self.i18n);
+                        if self.editor.take_library_request() {
+                            self.page = Page::Library;
+                        }
+                    }
                     Page::Settings => {
-                        let cfg = self.settings.saved().clone();
-                        let (vault, privacy, paths, core) =
-                            (&mut self.vault, &mut self.privacy, &self.paths, &self.core);
+                        let vault = &mut self.vault;
                         let i18n = &self.i18n;
-                        let mut embedded = |c: Category, ui: &mut egui::Ui| match c {
-                            Category::Vault => vault.ui(ui, i18n),
-                            Category::Privacy => privacy.ui(ui, i18n, paths, &cfg, core),
-                            _ => {}
+                        let mut embedded = |c: Category, ui: &mut egui::Ui| {
+                            if c == Category::Vault {
+                                vault.ui(ui, i18n);
+                            }
                         };
                         if let Some(saved) =
                             self.settings

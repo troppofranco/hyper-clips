@@ -70,10 +70,30 @@ pub fn decode_frame(path: &Path, at_ticks: i64) -> windows::core::Result<(u32, u
         }
         let s = last.ok_or_else(windows::core::Error::empty)?;
         let bytes = crate::mf::sample_bytes(&s)?;
-        // Rows may be padded (e.g. 1080 px wide): derive the real stride.
-        let stride = (bytes.len() / h.max(1) as usize) as u32;
-        Ok((w, h, stride.max(w * 4), bytes))
+        let stride = frame_stride(cur.GetUINT32(&MF_MT_DEFAULT_STRIDE).ok(), w, h, bytes.len());
+        // Encoders pad 1080p to 1088 coded rows; show only the real picture.
+        let h = if h == 1088 { 1080 } else { h };
+        Ok((w, h, stride, bytes))
     }
+}
+
+/// Row pitch of a decoded RGB32 frame. Prefer what the decoder declares;
+/// otherwise rows are tightly packed (`w * 4`) when the buffer is a whole
+/// number of such rows, which also covers extra padded rows at the bottom.
+/// Dividing the size by the height (the old approach) gave a slightly wrong
+/// pitch whenever rows were added, and the picture came out sheared.
+fn frame_stride(declared: Option<u32>, w: u32, h: u32, len: usize) -> u32 {
+    let tight = w * 4;
+    if let Some(s) = declared.map(|s| (s as i32).unsigned_abs())
+        && s >= tight
+        && len >= s as usize * h as usize
+    {
+        return s;
+    }
+    if tight > 0 && len.is_multiple_of(tight as usize) && len >= tight as usize * h as usize {
+        return tight;
+    }
+    ((len / h.max(1) as usize) as u32).max(tight)
 }
 
 /// Count every compressed sample of every stream (no decoding).
@@ -266,5 +286,23 @@ fn stream_name(reader: &IMFSourceReader, stream: u32) -> String {
                     .GetStreamIdentifier()
             });
         id.map(|i| format!("id {i}")).unwrap_or_default()
+    }
+}
+
+#[cfg(test)]
+mod stride_tests {
+    use super::frame_stride;
+
+    #[test]
+    fn stride_detection() {
+        // 1920x1080 frame decoded with 1088 rows: pitch is still 7680.
+        assert_eq!(frame_stride(None, 1920, 1080, 7680 * 1088), 7680);
+        // Declared pitch wins (bottom-up = negative).
+        assert_eq!(
+            frame_stride(Some((-8192i32) as u32), 1920, 1080, 8192 * 1080),
+            8192
+        );
+        // Padded pitch, no declaration, exact rows.
+        assert_eq!(frame_stride(None, 1000, 10, 4096 * 10), 4096);
     }
 }

@@ -37,11 +37,10 @@ pub enum Category {
     Updates,
     Backup,
     Vault,
-    Privacy,
 }
 
 impl Category {
-    const ALL: [Category; 15] = [
+    const ALL: [Category; 14] = [
         Category::General,
         Category::Appearance,
         Category::Capture,
@@ -56,7 +55,6 @@ impl Category {
         Category::Updates,
         Category::Backup,
         Category::Vault,
-        Category::Privacy,
     ];
 
     fn key(self) -> &'static str {
@@ -75,7 +73,6 @@ impl Category {
             Category::Updates => "cat-updates",
             Category::Backup => "cat-backup",
             Category::Vault => "cat-vault",
-            Category::Privacy => "cat-privacy",
         }
     }
 
@@ -95,7 +92,6 @@ impl Category {
             Category::Updates => Ic::Download,
             Category::Backup => Ic::Save,
             Category::Vault => Ic::Vault,
-            Category::Privacy => Ic::Privacy,
         }
     }
 }
@@ -287,7 +283,7 @@ impl SettingsPage {
                         ui.set_max_width((ui.available_width() - 18.0).min(860.0));
                         let t = self.screen.show(ui.ctx(), self.category);
                         crate::anim::apply_enter(ui, t);
-                        if matches!(self.category, Category::Vault | Category::Privacy) {
+                        if self.category == Category::Vault {
                             embedded(self.category, ui);
                             return;
                         }
@@ -341,7 +337,7 @@ impl SettingsPage {
                                 );
                             }
                             Category::Updates => self.updates(ui, i, paths),
-                            Category::Vault | Category::Privacy => {}
+                            Category::Vault => {}
                             Category::Backup => {
                                 if let Some(crate::settings_extra::ExtraOutcome::Restored(cfg)) =
                                     crate::settings_extra::backup(&mut self.extra, ui, i, paths)
@@ -1240,11 +1236,6 @@ fn position_combo(ui: &mut egui::Ui, i: &Localizer, id: &str, p: &mut OverlayPos
                 ui.selectable_value(p, v, i.tr(key));
             }
         });
-}
-
-/// Titled card (used by other pages).
-pub fn section(ui: &mut egui::Ui, title: &str, body: impl FnOnce(&mut egui::Ui)) {
-    card(ui, Some(title), body);
 }
 
 #[cfg(test)]

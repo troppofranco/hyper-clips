@@ -37,7 +37,6 @@ Windows (DXGI, Direct3D 11, Media Foundation, WASAPI).
 - **Plugin WebAssembly** in sandbox (interprete wasmi, nessun accesso a file o rete).
 - Backup e ripristino delle impostazioni; modalità **portable**.
 - Italiano e inglese; temi chiaro, scuro, OLED e **alto contrasto**; scala dell'interfaccia.
-- **Privacy Audit**: connessioni aperte in tempo reale, registro delle richieste, cartelle, "Cancella tutto".
 - **Aggiornamenti automatici** da GitHub Releases verificati con SHA-256, con rollback.
 
 ## Installazione
@@ -109,7 +108,7 @@ Rust on top of Windows' own media APIs.
 - **Extras:** temporary LAN sharing with a QR code; encrypted vault (XChaCha20-Poly1305 + Argon2id);
   CLI and token-protected loopback HTTP API ([docs/API.md](docs/API.md)); sandboxed WebAssembly plugins;
   settings backup/restore; portable mode; Italian/English; light, dark, OLED and high-contrast themes
-  with UI scaling; Privacy Audit (live connections, request log, folders, delete everything);
+  with UI scaling;
   SHA-256-verified auto-updates with rollback.
 
 **Install:** grab the per-user installer or the portable zip from

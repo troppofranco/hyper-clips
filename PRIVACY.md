@@ -27,9 +27,7 @@ Tutto il resto parte solo su tua azione esplicita ed è spento di default:
 La comunicazione tra core, studio e CLI usa una named pipe locale, accessibile solo
 all'utente corrente e chiusa ai client remoti.
 
-Il pannello **Privacy Audit** mostra in tempo reale le connessioni TCP aperte dai
-processi di Hyper Clips (dalla tabella di Windows), il registro delle richieste in
-uscita, le cartelle usate e permette di cancellare tutti i dati.
+Ogni richiesta di rete viene annotata in `logs\network.log`, un file di testo che puoi aprire in qualsiasi momento.
 
 ## Vault
 Il vault cifra le clip con XChaCha20-Poly1305; la chiave principale è protetta dalla
@@ -69,7 +67,7 @@ operativo, non dell'app.
 ## Verifica
 Il codice è aperto (GPL-3.0). Le dipendenze vengono controllate in CI con
 `cargo deny`, che blocca anche i crate di telemetria noti, e con `cargo audit`.
-Il pannello **Privacy Audit** permette di verificarlo direttamente.
+Il registro `logs\network.log` permette di verificarlo direttamente.
 
 ---
 
@@ -84,5 +82,4 @@ Il pannello **Privacy Audit** permette di verificarlo direttamente.
   foreground executable name; nothing is injected into games.
 - The encrypted vault uses XChaCha20-Poly1305 with an Argon2id-protected key; it does not protect
   against malware while unlocked, and forgotten passwords cannot be recovered.
-- The **Privacy Audit** panel shows live TCP connections of every Hyper Clips process, the outgoing
-  request log and the folders in use, and can delete all data.
+- Every network request is written to `logs\network.log`, a plain text file you can open at any time.

@@ -2,6 +2,17 @@
 
 Formato: [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) · Versioni: [SemVer](https://semver.org/lang/it/).
 
+## [Unreleased]
+
+### Interfaccia
+- Barra laterale come scheda arrotondata separata, come il resto dell'interfaccia; barra superiore che si adatta allo schermo intero (la ricerca occupa tutto lo spazio libero) e testo della ricerca centrato, con bordo colorato quando scrivi.
+- **Editor riorganizzato** in cinque passi: Taglia, Inquadra, Testo, Audio, Esporta. Ogni passo mostra solo le sue opzioni; anteprima e timeline al centro; il pulsante Esporta e il riepilogo del risultato sono sempre visibili; le opzioni tecniche sono in "Opzioni avanzate".
+- **Preset con la forma del risultato**: ogni preset mostra il formato (16:9, 9:16, 1:1), la risoluzione, il tipo di file e il limite di dimensione.
+- Rimossa la sezione Privacy (il registro delle richieste resta in `logs\network.log`).
+
+### Correzioni
+- **Anteprime distorte**: la decodifica del fotogramma calcolava male la larghezza delle righe quando il video ha righe aggiuntive (1080p codificato a 1088) o larghezze dispari, e l'immagine usciva a strisce oblique. Ora usa il passo dichiarato dal decoder.
+- Miniature più nitide (480×270) e mai stirate: ritagliate per riempire la scheda, le clip verticali mostrate intere. Vengono rigenerate una volta da sole.
 ## [0.3.2]
 
 ### Aggiornamento dall'app

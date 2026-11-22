@@ -11,7 +11,6 @@ mod icons;
 mod installer;
 mod library_page;
 mod player;
-mod privacy_page;
 mod settings;
 mod settings_extra;
 mod share_ui;
@@ -44,7 +43,10 @@ fn main() -> eframe::Result {
     }
     // Single instance: focus the existing window instead of opening another.
     let me = std::process::id();
-    if let Some(pid) = find_processes(STUDIO_EXE).into_iter().find(|p| *p != me) {
+    // Development builds can run next to an installed studio (UI testing).
+    let allow_second =
+        cfg!(debug_assertions) && std::env::var_os("HC_ALLOW_SECOND_STUDIO").is_some();
+    if !allow_second && let Some(pid) = find_processes(STUDIO_EXE).into_iter().find(|p| *p != me) {
         focus_process_window(pid);
         return Ok(());
     }

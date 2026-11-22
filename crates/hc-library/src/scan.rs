@@ -112,13 +112,17 @@ pub fn index_file(
         item.height = h;
     }
     let id = lib.upsert(&item)?;
-    let needs_thumb = lib
-        .get(id)?
-        .is_some_and(|i| i.thumb.as_ref().is_none_or(|t| !t.exists()));
-    if needs_thumb {
+    let old = lib.get(id)?.and_then(|i| i.thumb);
+    if !thumbs::is_current(old.as_deref(), thumbs_dir, id) {
         let dest = thumbs::thumb_path(thumbs_dir, id);
         match thumbs::make(path, kind, item.duration_ms, &dest) {
-            Ok(()) => lib.set_thumb(id, &dest)?,
+            Ok(()) => {
+                lib.set_thumb(id, &dest)?;
+                // Drop the outdated (smaller) thumbnail.
+                if let Some(o) = old.filter(|o| *o != dest) {
+                    let _ = std::fs::remove_file(o);
+                }
+            }
             Err(e) => tracing::debug!(error = %e, "thumbnail failed"),
         }
     }
@@ -159,7 +163,7 @@ pub fn scan_folders(lib: &Library, roots: &[PathBuf], thumbs_dir: &Path) -> Resu
             let thumb_ok = match known {
                 Some(id) => lib
                     .get(id)?
-                    .is_some_and(|i| i.thumb.as_ref().is_some_and(|t| t.exists())),
+                    .is_some_and(|i| thumbs::is_current(i.thumb.as_deref(), thumbs_dir, id)),
                 None => false,
             };
             if known.is_some() && thumb_ok {

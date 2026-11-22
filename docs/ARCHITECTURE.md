@@ -16,7 +16,7 @@ hyperclips.exe (core, sempre attivo)
 
 hyperclips-studio.exe (avviato su richiesta, termina alla chiusura)
   egui (glow) · libreria · player MF · editor · vault · condivisione LAN
-  impostazioni · privacy audit · ruolo --export-worker per la coda di export
+  impostazioni · ruolo --export-worker per la coda di export
 
 hc-updater-helper.exe (copiato in %TEMP% durante un aggiornamento)
   backup, Setup silenzioso o estrazione dello zip, health check, rollback

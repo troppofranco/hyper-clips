@@ -10,7 +10,6 @@ pub enum Ic {
     Editor,
     Vault,
     Settings,
-    Privacy,
     Share,
     Search,
     Camera,
@@ -112,20 +111,6 @@ pub fn paint(p: &Painter, rect: Rect, icon: Ic, color: Color32) {
                 line(c + d * 4.6 * u, c + d * 6.8 * u);
             }
             p.circle_stroke(c, 4.6 * u, st);
-        }
-        Ic::Privacy => {
-            poly(
-                vec![
-                    pt(8.0, 1.5),
-                    pt(13.5, 3.5),
-                    pt(13.0, 9.0),
-                    pt(8.0, 14.5),
-                    pt(3.0, 9.0),
-                    pt(2.5, 3.5),
-                ],
-                true,
-            );
-            poly(vec![pt(5.5, 8.0), pt(7.3, 9.8), pt(10.8, 6.0)], false);
         }
         Ic::Share => {
             p.circle_stroke(pt(12.0, 3.5), 2.0 * u, st);

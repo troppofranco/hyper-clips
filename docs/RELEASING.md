@@ -6,7 +6,7 @@
    all'avvio, ogni N ore, oppure mai. Owner e repository sono costanti in
    `crates/hc-updater/src/lib.rs` (`OWNER`, `REPO`).
 2. Le richieste usano lo User-Agent generico `HyperClips-Updater`, senza identificativi,
-   e ognuna viene registrata in `logs\network.log`, consultabile dal Privacy Audit.
+   e ognuna viene registrata in `logs\network.log`.
 3. Prima di installare, lo studio scarica `checksums.txt` dalla release e confronta lo
    **SHA-256** del pacchetto scaricato. Se non corrisponde, l'aggiornamento viene annullato.
    Il controllo protegge da download corrotti o incompleti; l'autenticità dei pacchetti

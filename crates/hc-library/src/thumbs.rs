@@ -8,11 +8,19 @@ use hc_core::media::TIMEBASE;
 
 use crate::{Kind, LibraryError, Result};
 
-pub const THUMB_W: u32 = 256;
-pub const THUMB_H: u32 = 144;
+/// Big enough for sharp cards on high-DPI screens (cards are ~240-420 pt).
+pub const THUMB_W: u32 = 480;
+pub const THUMB_H: u32 = 270;
 
+/// Size and version are part of the name, so thumbnails made by older
+/// versions (smaller, or sheared by a stride bug) are regenerated once.
 pub fn thumb_path(dir: &Path, id: i64) -> PathBuf {
-    dir.join(format!("{id}.jpg"))
+    dir.join(format!("{id}-{THUMB_W}-v2.jpg"))
+}
+
+/// True when `thumb` is the up-to-date thumbnail of item `id`.
+pub fn is_current(thumb: Option<&Path>, dir: &Path, id: i64) -> bool {
+    thumb.is_some_and(|t| t == thumb_path(dir, id) && t.exists())
 }
 
 /// Create the thumbnail for `src` at `dest`. Video thumbnails come from

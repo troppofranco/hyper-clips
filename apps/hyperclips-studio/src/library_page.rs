@@ -71,7 +71,7 @@ pub struct LibraryPage {
     dirty: bool,
     last_reload: Instant,
     /// Thumbnail textures: (texture, last use tick, when it was loaded).
-    thumbs: HashMap<i64, (TextureHandle, u64, Instant)>,
+    thumbs: HashMap<i64, (TextureHandle, u64, Instant, std::path::PathBuf)>,
     /// When the current set of cards appeared (cascade entrance).
     appear: Instant,
     shown_ids: Vec<i64>,
@@ -180,20 +180,26 @@ impl LibraryPage {
     pub fn search_box(&mut self, ui: &mut egui::Ui, i: &Localizer, width: f32) {
         let p = crate::theme::palette(ui.ctx());
         let h = if p.compact { 30.0 } else { 36.0 };
-        egui::Frame::new()
+        let mut focused = false;
+        let frame = egui::Frame::new()
             .fill(p.card_hover)
             .stroke(egui::Stroke::new(1.0, p.line_strong))
             .corner_radius(h / 2.0)
-            .inner_margin(egui::Margin::symmetric(14, 0))
+            .inner_margin(egui::Margin::symmetric(16, 0))
             .show(ui, |ui| {
                 ui.set_height(h);
                 ui.horizontal_centered(|ui| {
+                    // Text vertically centred in the pill; width follows the bar.
                     let r = ui.add(
                         egui::TextEdit::singleline(&mut self.filter.text)
                             .frame(egui::Frame::NONE)
+                            .margin(egui::Margin::ZERO)
+                            .align(egui::Align2::LEFT_CENTER)
+                            .min_size(Vec2::new(0.0, h))
                             .hint_text(i.tr("lib-search"))
-                            .desired_width((width - 70.0).max(120.0)),
+                            .desired_width((width - 32.0 - 60.0).max(120.0)),
                     );
+                    focused = r.has_focus();
                     if r.changed() {
                         self.dirty = true;
                     }
@@ -222,6 +228,16 @@ impl LibraryPage {
                     egui::Popup::menu(&resp).show(|ui| self.filter_menu(ui, i));
                 });
             });
+        // Accent ring while typing (launcher: focus outline).
+        let t = crate::anim::flag(ui.ctx(), ui.scope_id().with("search-focus"), focused, 0.18);
+        if t > 0.0 {
+            ui.painter().rect_stroke(
+                frame.response.rect,
+                h / 2.0,
+                egui::Stroke::new(1.5, crate::anim::mix(p.line_strong, p.accent_line, t)),
+                egui::StrokeKind::Inside,
+            );
+        }
     }
     /// A clip the user asked to open in the editor.
     pub fn take_edit_request(&mut self) -> Option<(std::path::PathBuf, String)> {
@@ -261,7 +277,15 @@ impl LibraryPage {
         budget: &mut usize,
     ) -> Option<(TextureHandle, Instant)> {
         self.tick += 1;
-        if let Some((tex, used, at)) = self.thumbs.get_mut(&item.id) {
+        // A regenerated thumbnail has a new path: drop the stale texture.
+        if self
+            .thumbs
+            .get(&item.id)
+            .is_some_and(|(_, _, _, p)| item.thumb.as_ref() != Some(p))
+        {
+            self.thumbs.remove(&item.id);
+        }
+        if let Some((tex, used, at, _)) = self.thumbs.get_mut(&item.id) {
             *used = self.tick;
             return Some((tex.clone(), *at));
         }
@@ -278,12 +302,13 @@ impl LibraryPage {
         );
         if self.thumbs.len() >= THUMB_CACHE {
             // Evict the least recently drawn thumbnail.
-            if let Some((&old, _)) = self.thumbs.iter().min_by_key(|(_, (_, u, _))| *u) {
+            if let Some((&old, _)) = self.thumbs.iter().min_by_key(|(_, (_, u, _, _))| *u) {
                 self.thumbs.remove(&old);
             }
         }
         let now = Instant::now();
-        self.thumbs.insert(item.id, (tex.clone(), self.tick, now));
+        self.thumbs
+            .insert(item.id, (tex.clone(), self.tick, now, path.clone()));
         Some((tex, now))
     }
 
@@ -1235,10 +1260,22 @@ fn card_ui(
     }
     if let Some(t) = tex {
         let alpha = anim.thumb * anim.appear;
-        egui::Image::new((t.id(), thumb.size()))
-            .corner_radius(tr)
-            .tint(egui::Color32::WHITE.gamma_multiply(alpha))
-            .paint_at(ui, thumb);
+        let img = t.size_vec2();
+        if img.x < img.y {
+            // Vertical clips (9:16 exports): show the whole frame, centred.
+            let h = thumb.height();
+            let w = (h * img.x / img.y).min(thumb.width());
+            let r = egui::Rect::from_center_size(thumb.center(), Vec2::new(w, h));
+            egui::Image::new((t.id(), r.size()))
+                .tint(egui::Color32::WHITE.gamma_multiply(alpha))
+                .paint_at(ui, r);
+        } else {
+            egui::Image::new((t.id(), thumb.size()))
+                .uv(cover_uv(img, thumb.size()))
+                .corner_radius(tr)
+                .tint(egui::Color32::WHITE.gamma_multiply(alpha))
+                .paint_at(ui, thumb);
+        }
     }
     painter.rect_stroke(
         thumb,
@@ -1320,6 +1357,30 @@ fn card_ui(
     let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
     (resp.clicked() && !star.clicked(), star.clicked())
 }
+/// UV rect that fills a `frame`-sized box with an image of `img` size without
+/// stretching it: the image is scaled to cover the box and centred, the
+/// overflowing side is cropped (CSS `object-fit: cover`).
+fn cover_uv(img: Vec2, frame: Vec2) -> egui::Rect {
+    if img.x <= 0.0 || img.y <= 0.0 || frame.x <= 0.0 || frame.y <= 0.0 {
+        return egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+    }
+    let (ia, fa) = (img.x / img.y, frame.x / frame.y);
+    if ia > fa {
+        // Image wider than the box: crop left and right.
+        let w = fa / ia;
+        egui::Rect::from_min_max(
+            egui::pos2((1.0 - w) / 2.0, 0.0),
+            egui::pos2((1.0 + w) / 2.0, 1.0),
+        )
+    } else {
+        let h = ia / fa;
+        egui::Rect::from_min_max(
+            egui::pos2(0.0, (1.0 - h) / 2.0),
+            egui::pos2(1.0, (1.0 + h) / 2.0),
+        )
+    }
+}
+
 fn bgra_image(w: u32, h: u32, bgra: &[u8]) -> ColorImage {
     let rgba: Vec<u8> = bgra
         .as_chunks::<4>()
@@ -1333,4 +1394,18 @@ fn bgra_image(w: u32, h: u32, bgra: &[u8]) -> ColorImage {
 fn fmt_time(secs: f64) -> String {
     let s = secs.max(0.0) as u64;
     format!("{}:{:02}", s / 60, s % 60)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cover_crops_instead_of_stretching() {
+        let uv = cover_uv(Vec2::new(400.0, 300.0), Vec2::new(160.0, 90.0));
+        assert!((uv.width() - 1.0).abs() < 1e-6);
+        assert!((uv.height() - 0.75).abs() < 1e-4);
+        let uv = cover_uv(Vec2::new(320.0, 90.0), Vec2::new(160.0, 90.0));
+        assert!((uv.width() - 0.5).abs() < 1e-6 && (uv.center().x - 0.5).abs() < 1e-6);
+    }
 }
