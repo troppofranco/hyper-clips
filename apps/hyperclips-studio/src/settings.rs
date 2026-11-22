@@ -165,17 +165,14 @@ impl SettingsPage {
         &mut self,
         paths: &AppPaths,
         core: &CoreLink,
-        f: impl FnOnce(&mut Config),
+        f: impl Fn(&mut Config),
     ) -> Result<(), String> {
         let mut next = self.saved.clone();
         f(&mut next);
         next.sanitize();
         next.save(&paths.config_file()).map_err(|e| e.to_string())?;
-        // Carry the same change into the draft.
-        let mut draft = self.draft.clone();
-        draft.capture.replay_seconds = next.capture.replay_seconds;
-        draft.capture.height = next.capture.height;
-        self.draft = draft;
+        // Carry the same change into the draft (keeping other unsaved edits).
+        f(&mut self.draft);
         self.saved = next;
         let _ = core.request(&Request::ReloadConfig);
         Ok(())
@@ -1103,12 +1100,20 @@ impl SettingsPage {
                     _ => String::new(),
                 };
                 row(ui, &i.tr(&format!("action-{id}")), &err, |ui| {
-                    let resp = ui.add(egui::TextEdit::singleline(field).desired_width(180.0));
-                    // Normalise to canonical form when the field loses focus.
-                    if resp.lost_focus()
-                        && let Ok(Some(h)) = Hotkey::parse_optional(field)
+                    // Right-to-left row: the "off" button first, then the key-cap.
+                    if !field.is_empty()
+                        && ui
+                            .small_button(i.tr("key-clear"))
+                            .on_hover_text(i.tr("key-clear-hint"))
+                            .clicked()
                     {
-                        *field = h.to_string();
+                        field.clear();
+                    }
+                    // Click, then press the combination (Esc cancels).
+                    if let crate::keycapture::Capture::Set(combo) =
+                        crate::keycapture::key_capture(ui, id, None, field, &i.tr("key-press-now"))
+                    {
+                        *field = combo;
                     }
                 });
                 if k + 1 < n {

@@ -54,7 +54,7 @@ settings-replay-seconds = Durata replay (secondi)
 settings-fps = Frame rate
 settings-bitrate = Bitrate (kbps)
 settings-hotkeys = Hotkey
-settings-hotkeys-hint = Esempi: F8, Ctrl+Shift+S, Alt+Mouse5. Lascia vuoto per disattivare.
+settings-hotkeys-hint = Clicca un tasto e premi la combinazione che vuoi (anche Ctrl, Alt, Shift o i tasti laterali del mouse). Esc annulla.
 settings-updates = Aggiornamenti
 settings-update-check = Controlla aggiornamenti
 update-on-startup = All'avvio
@@ -523,7 +523,7 @@ radius-normal = Normali
 radius-round = Arrotondati
 side-storage = { $count } clip · { $used } · { $free } liberi
 top-keybind = Salva clip
-top-keybind-hint = Il tasto che salva il replay. Clicca per cambiarlo.
+top-keybind-hint = Il tasto che salva il replay. Clicca e premi il nuovo tasto per cambiarlo.
 top-replay-hint = Quanti secondi tenere nel replay
 top-resolution-hint = Risoluzione delle clip
 
@@ -561,3 +561,8 @@ ed-advanced = Opzioni avanzate
 ed-target-hint = Ricomprime finché il file non supera questa dimensione.
 ed-max-mb = max { $mb } MB
 ed-dismiss = Togli
+
+## Key capture
+key-press-now = Premi un tasto…
+key-clear = Disattiva
+key-clear-hint = Nessun tasto per questa azione

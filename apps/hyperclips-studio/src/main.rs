@@ -9,6 +9,7 @@ mod core_link;
 mod editor_page;
 mod icons;
 mod installer;
+mod keycapture;
 mod library_page;
 mod player;
 mod settings;

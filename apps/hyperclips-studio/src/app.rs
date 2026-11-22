@@ -260,17 +260,17 @@ impl StudioApp {
                             self.quick_edit(|c| c.capture.replay_seconds = s);
                         }
                         // Save-clip key.
-                        let key = if cfg.hotkeys.save_clip.is_empty() {
-                            "-"
-                        } else {
-                            cfg.hotkeys.save_clip.as_str()
-                        };
-                        if widgets::bar_pill(ui, &self.i18n.tr("top-keybind"), Some(key), false)
-                            .on_hover_text(self.i18n.tr("top-keybind-hint"))
-                            .clicked()
+                        // Click it, then press the new key: saved and applied at once.
+                        if let crate::keycapture::Capture::Set(combo) =
+                            crate::keycapture::key_capture(
+                                ui,
+                                "top-save-clip",
+                                Some(&self.i18n.tr("top-keybind")),
+                                &cfg.hotkeys.save_clip,
+                                &self.i18n.tr("key-press-now"),
+                            )
                         {
-                            self.page = Page::Settings;
-                            self.settings.open_category(Category::Hotkeys);
+                            self.set_save_clip_key(&cfg, combo);
                         }
                         ui.add_space(14.0);
                         ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
@@ -293,7 +293,29 @@ impl StudioApp {
 
     /// Change a capture setting from the top bar: saved at once and applied
     /// by the core.
-    fn quick_edit(&mut self, f: impl FnOnce(&mut Config)) {
+    /// New save-clip key from the top bar, refused if another action uses it.
+    fn set_save_clip_key(&mut self, cfg: &Config, combo: String) {
+        let mut hk = cfg.hotkeys.clone();
+        hk.save_clip = combo.clone();
+        // A clash is reported on one of the two actions: look at both sides.
+        let clash = crate::settings::hotkey_problems(&hk)
+            .into_iter()
+            .find_map(|(id, m)| match m.strip_prefix("dup:") {
+                Some(other) if id == "save-clip" => Some(other.to_owned()),
+                Some("save-clip") => Some(id.to_owned()),
+                _ => None,
+            });
+        if let Some(other) = clash {
+            let other = self.i18n.tr(&format!("action-{other}"));
+            self.notice = Some((
+                self.i18n.tr_args("hotkey-duplicate", &[("other", &other)]),
+                Instant::now(),
+            ));
+            return;
+        }
+        self.quick_edit(move |c| c.hotkeys.save_clip = combo.clone());
+    }
+    fn quick_edit(&mut self, f: impl Fn(&mut Config)) {
         match self.settings.quick_edit(&self.paths, &self.core, f) {
             Ok(()) => self.notice = Some((self.i18n.tr("settings-saved"), Instant::now())),
             Err(e) => self.notice = Some((e, Instant::now())),
