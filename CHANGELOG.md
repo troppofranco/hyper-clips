@@ -2,7 +2,7 @@
 
 Formato: [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) · Versioni: [SemVer](https://semver.org/lang/it/).
 
-## [Unreleased]
+## [0.3.2]
 
 ### Aggiornamento dall'app
 - Il popup degli aggiornamenti ha il pulsante **Aggiorna ora**: scarica il pacchetto giusto (installer o zip portable), ne verifica lo SHA-256, chiude servizio e studio, installa e riapre lo studio sulla nuova versione, con barra di avanzamento. Se la nuova versione non parte, viene ripristinata la precedente e lo studio si riapre comunque.
