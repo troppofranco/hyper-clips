@@ -2,7 +2,7 @@
 
 Formato: [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) · Versioni: [SemVer](https://semver.org/lang/it/).
 
-## [Unreleased]
+## [0.3.4]
 
 ### Scorciatoie
 - Le scorciatoie si impostano premendole: clicca il tasto "Salva clip" nella barra in alto (o un'azione in Impostazioni > Scorciatoie) e premi la combinazione, anche con Ctrl/Alt/Shift o i tasti laterali del mouse. Esc annulla. Dalla barra in alto viene salvata e applicata subito; se è già usata da un'altra azione compare un avviso. Pulsante "Disattiva" per togliere una scorciatoia.
