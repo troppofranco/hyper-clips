@@ -2,7 +2,7 @@
 
 Formato: [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) · Versioni: [SemVer](https://semver.org/lang/it/).
 
-## [Unreleased]
+## [0.3.3]
 
 ### Interfaccia
 - Barra laterale come scheda arrotondata separata, come il resto dell'interfaccia; barra superiore che si adatta allo schermo intero (la ricerca occupa tutto lo spazio libero) e testo della ricerca centrato, con bordo colorato quando scrivi.

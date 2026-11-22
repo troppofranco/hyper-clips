@@ -7,7 +7,7 @@ di risorse contenuto e **privacy totale**: nessun account, nessuna telemetria,
 nessun tracker, nessun cloud. Scritto in Rust, usa solo le API multimediali di
 Windows (DXGI, Direct3D 11, Media Foundation, WASAPI).
 
-> **Stato: 0.3.2.** Tutte le fasi del piano sono implementate.
+> **Stato: 0.3.3.** Tutte le fasi del piano sono implementate.
 > Alcune parti non sono ancora verificate su tutto l'hardware (vedi
 > [Limiti noti](#limiti-noti)).
 
@@ -92,7 +92,7 @@ Record, edit and manage game clips on Windows with a small footprint and
 **complete privacy**: no account, no telemetry, no trackers, no cloud. Written in
 Rust on top of Windows' own media APIs.
 
-> **Status: 0.3.2.** Every planned phase is implemented; some parts
+> **Status: 0.3.3.** Every planned phase is implemented; some parts
 > are not yet verified on all hardware (see *Known limits*).
 
 **Features**
